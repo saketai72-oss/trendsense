@@ -1,8 +1,10 @@
 import pandas as pd
 import re
 import os
-import ast  # Thư viện để giải mã mảng JSON chứa comment
+import ast  
 from transformers import pipeline
+import time
+import math
 
 # ==========================================
 # PHẦN 1: CẤU HÌNH ĐƯỜNG DẪN 
@@ -13,7 +15,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 RAW_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
 PROCESSED_DIR = os.path.join(PROJECT_ROOT, "data", "processed")
 
-# AI giờ sẽ đọc từ cái "Hồ dữ liệu" khổng lồ
 INPUT_FILE = os.path.join(RAW_DIR, "tiktok_full_raw.csv") 
 OUTPUT_FILE = os.path.join(PROCESSED_DIR, "tiktok_analyzed.csv")
 
@@ -55,9 +56,7 @@ except FileNotFoundError:
     print("[!] LỖI: Không tìm thấy file Raw. Hãy chạy apify_bot.py trước!")
     exit()
 
-# Tạo một danh sách để chứa dữ liệu đã được làm sạch
 clean_data_list = []
-
 print(f"[*] Bắt đầu dọn rác và dùng AI phân tích {len(df_raw)} video...")
 
 for index, row in df_raw.iterrows():
@@ -68,12 +67,27 @@ for index, row in df_raw.iterrows():
     shares = pd.to_numeric(row.get('shareCount', 0), errors='coerce')
     saves = pd.to_numeric(row.get('collectCount', 0), errors='coerce')
     
+    # --- TÍNH TỐC ĐỘ TĂNG TRƯỞNG (HEURISTIC) ---
+    create_time = pd.to_numeric(row.get('createTime', 0), errors='coerce')
+    current_time = int(time.time()) 
+    
+    views_per_hour = 0
+    if create_time > 0:
+        age_seconds = current_time - create_time
+        age_hours = age_seconds / 3600
+        if age_hours <= 0: age_hours = 0.1 
+        views_per_hour = round(views / age_hours, 2)
+
     # Tính Trend Score
     trend_score = 0
-    if views > 0:
-        trend_score = round(((likes * 1) + (comments * 2) + (saves * 3) + (shares * 4)) / views * 100, 2)
-
-    # Khởi tạo 1 dòng dữ liệu sạch
+    if views >= 5000:
+        engagement_points = (likes * 1) + (comments * 2) + (saves * 3) + (shares * 4)
+        base_rate = (engagement_points / views) * 100
+        # Nhân hệ số khuếch đại bằng Logarit để thưởng cho view to
+        trend_score = round(base_rate * math.log10(views), 2)
+    else:
+        trend_score = 0 
+        
     clean_row = {
         'Link': row.get('Link', ""),
         'Caption': row.get('text', ""),
@@ -82,6 +96,7 @@ for index, row in df_raw.iterrows():
         'Comments': comments,
         'Shares': shares,
         'Saves': saves,
+        'Views_Per_Hour': views_per_hour,
         'Trend_Score': trend_score
     }
 
@@ -91,20 +106,17 @@ for index, row in df_raw.iterrows():
     
     if pd.notna(raw_comments_str) and isinstance(raw_comments_str, str) and raw_comments_str != '[]':
         try:
-            # Biến chuỗi JSON thành List Python
             comments_list = ast.literal_eval(raw_comments_str)
             if isinstance(comments_list, list):
-                # Sắp xếp theo Tim giảm dần
                 sorted_cmts = sorted(comments_list, key=lambda x: x.get('diggCount', 0), reverse=True)
                 top_10_texts = [c.get('text', '') for c in sorted_cmts[:10]]
         except Exception:
             pass
 
-    # Lấp đầy đủ 10 ô dù video không đủ comment
     while len(top_10_texts) < 10:
         top_10_texts.append("")
 
-    # 3. AI BẮT ĐẦU ĐỌC VÀ CHẤM ĐIỂM
+    # 3. AI BẮT ĐẦU ĐỌC VÀ CHẤM ĐIỂM (CHỈ ĐỌC COMMENT)
     total_stars = 0
     valid_comments = 0
     
@@ -119,24 +131,20 @@ for index, row in df_raw.iterrows():
                 total_stars += stars
                 valid_comments += 1
                 
-    # 4. TỔNG HỢP ĐIỂM (CÓ DỰ PHÒNG QUA CAPTION)
+    # 4. TỔNG HỢP ĐIỂM 
     if valid_comments > 0:
         avg_stars = total_stars / valid_comments
-    else:
-        caption_text = clean_text(clean_row['Caption'])
-        if caption_text:
-            _, avg_stars = get_sentiment(caption_text)
-        else:
-            avg_stars = 0
-
-    if avg_stars > 0:
         clean_row['Positive_Score'] = round((avg_stars / 5) * 100, 2) 
-        if avg_stars >= 3.5: clean_row['Video_Sentiment'] = "🔥 HOT & TÍCH CỰC"
-        elif avg_stars <= 2.5: clean_row['Video_Sentiment'] = "⚠️ TRANH CÃI / TIÊU CỰC"
-        else: clean_row['Video_Sentiment'] = "BÌNH THƯỜNG"
+        
+        if avg_stars >= 3.5: 
+            clean_row['Video_Sentiment'] = "🟢 TÍCH CỰC"
+        elif avg_stars <= 2.5: 
+            clean_row['Video_Sentiment'] = "🔴 TIÊU CỰC / TRANH CÃI"
+        else: 
+            clean_row['Video_Sentiment'] = "🟡 TRUNG LẬP"
     else:
         clean_row['Positive_Score'] = 0
-        clean_row['Video_Sentiment'] = "KHÔNG ĐỦ DỮ LIỆU"
+        clean_row['Video_Sentiment'] = "⚪ KHÔNG CÓ BÌNH LUẬN"
         
     clean_data_list.append(clean_row)
 
@@ -146,5 +154,5 @@ for index, row in df_raw.iterrows():
 df_clean = pd.DataFrame(clean_data_list)
 df_clean.to_csv(OUTPUT_FILE, index=False, encoding='utf-8-sig')
 
-print(f"\n[*] XONG! Đã dọn dẹp {len(df_raw.columns)} cột Rác -> 15 Cột Tinh Hoa.")
+print(f"\n[*] XONG! Đã dọn dẹp và phân tích thành công.")
 print(f"[*] Dữ liệu chín đã sẵn sàng cho Dashboard tại: \n[*] {OUTPUT_FILE}")
