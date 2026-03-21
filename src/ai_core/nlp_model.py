@@ -1,24 +1,22 @@
 import pandas as pd
 import re
 import os
+import sys
 import ast  
 from transformers import pipeline
 import time
 import math
 
+# Khai báo cho Python biết thư mục gốc ở đâu để import file settings
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from config import settings
+
 # ==========================================
-# PHẦN 1: CẤU HÌNH ĐƯỜNG DẪN 
+# PHẦN 1: CẤU HÌNH ĐƯỜNG DẪN TỪ SETTINGS
 # ==========================================
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__)) 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR)) 
-
-RAW_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
-PROCESSED_DIR = os.path.join(PROJECT_ROOT, "data", "processed")
-
-INPUT_FILE = os.path.join(RAW_DIR, "tiktok_full_raw.csv") 
-OUTPUT_FILE = os.path.join(PROCESSED_DIR, "tiktok_analyzed.csv")
-
-os.makedirs(PROCESSED_DIR, exist_ok=True)
+# Nhận đường dẫn trực tiếp từ Trạm điều phối trung tâm
+INPUT_FILE = settings.RAW_FILE 
+OUTPUT_FILE = settings.PROCESSED_FILE
 
 # ==========================================
 # PHẦN 2: KHỞI TẠO MÔ HÌNH AI & HÀM BỔ TRỢ
