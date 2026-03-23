@@ -54,9 +54,8 @@ print(f"[*] Đã cào xong {len(raw_items)} video gốc. Đang móc nối Commen
 # ==========================================
 for item in raw_items:
     dataset_url = item.get("commentsDatasetUrl")
-    item["comments"] = [] # Mặc định là rỗng để tránh lỗi
+    item["comments"] = [] 
     
-    # Nếu Apify có để lại link kho comment phụ, mình tự dùng Python tải về cho đỡ tốn tiền
     if dataset_url:
         try:
             res = requests.get(dataset_url)

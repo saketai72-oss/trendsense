@@ -9,7 +9,7 @@ PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
 load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, ".env"))
 
 # 3. KẾT NỐI API KEYS
-APIFY_TOKEN = os.getenv("APIFY_TOKEN")
+APIFY_TOKEN = os.getenv("APIFY_API_TOKEN")
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
 # 4. QUẢN LÝ ĐƯỜNG DẪN KHO DỮ LIỆU
