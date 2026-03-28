@@ -1,0 +1,47 @@
+name: 🤖 Tự động cào data và chạy AI
+
+# Lên lịch chạy: Chạy mỗi 4 tiếng 1 lần và cho phép bấm chạy bằng tay
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+# Cho phép con Bot của Github được quyền ghi đè (Push) file CSV mới lên repo
+permissions:
+  contents: write
+
+jobs:
+  run-ai-pipeline:
+    runs-on: ubuntu-latest # Thuê máy chủ Linux xịn nhất của Github
+
+    steps:
+      - name: 📥 Kéo code từ kho về máy ảo
+        uses: actions/checkout@v4
+
+      - name: 🐍 Cài đặt Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip' # Lưu cache để lần sau cài thư viện nhanh hơn
+
+      - name: 📦 Cài đặt thư viện (Requirements)
+        run: pip install -r requirements.txt
+
+      - name: 🕷️ BƯỚC 1 - Kéo Data từ Hugging Face
+        env:
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }} # Lấy chìa khóa từ két sắt
+        run: python src/scraper/hf_bridge.py
+
+      - name: 🧠 BƯỚC 2 - AI chấm điểm cảm xúc (NLP)
+        run: python src/ai_core/nlp_model.py
+
+      - name: 🚀 BƯỚC 3 - AI dự báo xu hướng Viral
+        run: python src/ai_core/predictive_model.py
+
+      - name: 💾 Lưu file data mới và đẩy ngược lên Github
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git commit -m "🤖 AI tự động cập nhật data & dự báo [skip ci]" || echo "Không có data mới để lưu"
+          git push

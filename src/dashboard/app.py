@@ -3,8 +3,6 @@ import pandas as pd
 import plotly.express as px
 import os
 import sys
-import re
-from keybert import KeyBERT
 
 # Khai báo cho Python biết thư mục gốc ở đâu để import file settings
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -13,141 +11,161 @@ from config import settings
 # ==========================================
 # PHẦN 1: CẤU HÌNH GIAO DIỆN & ĐƯỜNG DẪN
 # ==========================================
-st.set_page_config(page_title="TrendSense AI", page_icon="📈", layout="wide")
+st.set_page_config(page_title="TrendSense Radar", page_icon="🎯", layout="wide")
 
-# Lấy đường dẫn thẳng từ Trạm điều phối trung tâm
 DATA_FILE = settings.PROCESSED_FILE
 
-st.title("📈 TrendSense: Hệ Thống Phát Hiện Xu Hướng AI")
-st.markdown("Hệ thống tự động cào dữ liệu, phân tích cảm xúc và trích xuất từ khóa Trending.")
+st.title("🎯 TrendSense Radar: Hệ Thống Dự Báo Viral AI")
+st.markdown("Phân tích chỉ số tương tác và dự báo xác suất bùng nổ của các video ngắn.")
+
 # ==========================================
-# PHẦN 2: TẢI VÀ KIỂM TRA DỮ LIỆU
+# PHẦN 2: TẢI VÀ LÀM SẠCH DỮ LIỆU
 # ==========================================
 @st.cache_data
 def load_data():
     if not os.path.exists(DATA_FILE):
         return None
     df = pd.read_csv(DATA_FILE, low_memory=False)
+    
+    # 1. Xử lý "Không có tiêu đề": Lấy ID video từ Link
+    def extract_id(link):
+        if not isinstance(link, str) or 'video/' not in link:
+            return "Video Khuyết Danh"
+        return "ID: " + link.split('video/')[-1].split('?')[0][:10] + "..."
+
+    df['Display_Name'] = df['Caption'].apply(lambda x: str(x)[:40] + "..." if pd.notna(x) and str(x).strip() != "" else None)
+    df['Display_Name'] = df['Display_Name'].fillna(df['Link'].apply(extract_id))
+    
+    # Tạo text để chèn link bấm được vào biểu đồ
+    df['Clickable_Name'] = df.apply(lambda row: f"<a href='{row['Link']}'>{row['Display_Name']}</a>", axis=1)
+
+    # 2. Đảm bảo có cột Xác suất (Nếu người dùng chưa chạy file dự đoán)
+    if 'Viral_Probability_%' not in df.columns:
+        df['Viral_Probability_%'] = 0.0
+        
     return df
 
 df = load_data()
 
 if df is None or df.empty:
-    st.warning("⚠️ Chưa có dữ liệu! Cậu hãy chạy bot cào (apify_bot.py) và AI (nlp_model.py) trước nhé.")
+    st.warning("⚠️ Chưa có dữ liệu! Cậu hãy chạy luồng cào data và huấn luyện AI trước nhé.")
     st.stop()
 
 # ==========================================
 # PHẦN 3: TỔNG QUAN CHỈ SỐ (METRICS)
 # ==========================================
 st.divider()
-st.subheader("📊 Tổng quan Dữ liệu")
+st.subheader("📊 Trạm Quan Trắc Tương Tác")
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Tổng số Video cào", f"{len(df):,}")
+    st.metric("Tổng Số Video Đang Theo Dõi", f"{len(df):,}")
 with col2:
-    st.metric("Tổng lượt Xem (Views)", f"{int(df['Views'].sum()):,}")
+    st.metric("Tổng Lượt Xem Hệ Sinh Thái", f"{int(df['Views'].sum()):,}")
 with col3:
-    st.metric("Tổng lượt Tim (Likes)", f"{int(df['Likes'].sum()):,}")
+    st.metric("Tổng Lượt Tim Mạng Lưới", f"{int(df['Likes'].sum()):,}")
 with col4:
-    hot_videos = len(df[df['Video_Sentiment'] == "🟢 TÍCH CỰC"])
-    st.metric("Video Tích cực", hot_videos)
+    # Đếm số video có tỷ lệ viral cao (> 50%)
+    viral_videos = len(df[df['Viral_Probability_%'] > 50])
+    st.metric("🔥 Mầm Mống Viral Phân Tích Được", viral_videos)
 
 # ==========================================
-# PHẦN 4: BIỂU ĐỒ TRỰC QUAN
+# PHẦN 4: BIỂU ĐỒ TRỰC QUAN AI
 # ==========================================
 st.divider()
-colA, colB = st.columns(2)
+
+# HÀNG 1: DỰ BÁO XU HƯỚNG
+st.subheader("🚀 Top 15 Video Có Xác Suất Viral Cao Nhất")
+st.caption("AI học từ tương tác ngầm để chỉ ra những video có tiềm năng bùng nổ trong tương lai.")
+
+top_viral = df.sort_values(by="Viral_Probability_%", ascending=False).head(15)
+
+# Đổi màu biểu đồ dựa trên tỷ lệ Viral
+fig_viral = px.bar(
+    top_viral, 
+    x="Viral_Probability_%", 
+    y="Clickable_Name", 
+    orientation='h',
+    color="Viral_Probability_%",
+    color_continuous_scale="Reds", 
+    hover_data=["Views", "Likes", "Trend_Score"],
+    text="Viral_Probability_%"
+)
+fig_viral.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+fig_viral.update_layout(yaxis={'categoryorder':'total ascending'}, height=500)
+st.plotly_chart(fig_viral, use_container_width=True)
+
+
+# HÀNG 2: BÓC TÁCH CÔNG THỨC VIRAL (SCATTER PLOT)
+st.divider()
+colA, colB = st.columns([2, 1])
 
 with colA:
-    st.subheader("Bức tranh Cảm xúc Cộng đồng")
-    sentiment_counts = df['Video_Sentiment'].value_counts().reset_index()
-    sentiment_counts.columns = ['Video_Sentiment', 'Count']
+    st.subheader("Bản Đồ Phân Bổ: Tim vs Xem vs Xác Suất Viral")
+    st.caption("Khám phá xem video cần bao nhiêu Tim và Xem để lọt vào 'Vùng Đỏ' (Viral).")
     
-    fig_pie = px.pie(sentiment_counts, values='Count', names='Video_Sentiment', hole=0.4,
-                     color='Video_Sentiment',
-                     color_discrete_map={
-                         "🟢 TÍCH CỰC": "#00CC96",
-                         "🔴 TIÊU CỰC / TRANH CÃI": "#EF553B",
-                         "🟡 TRUNG LẬP": "#FFA15A",
-                         "⚪ KHÔNG CÓ BÌNH LUẬN": "#888888"
-                     })
-    st.plotly_chart(fig_pie, use_container_width=True)
+    # Lọc bỏ nhiễu: Chỉ vẽ những video có View từ trung bình trở lên để nhìn rõ
+    min_views_to_show = df['Views'].quantile(0.2)
+    df_scatter = df[df['Views'] > min_views_to_show]
+
+    fig_scatter = px.scatter(
+        df_scatter, 
+        x="Views", 
+        y="Likes", 
+        color="Viral_Probability_%",
+        size="Comments",  # Bong bóng to hay nhỏ dựa vào Comment
+        hover_name="Display_Name",
+        log_x=True, log_y=True, # Dùng thang logarit để dễ nhìn do chênh lệch View quá lớn
+        color_continuous_scale="Turbo"
+    )
+    st.plotly_chart(fig_scatter, use_container_width=True)
 
 with colB:
-    st.subheader("Top 10 Video Sức Hút Khủng Nhất (Trend Score)")
-    top_videos = df.sort_values(by="Trend_Score", ascending=False).head(10)
+    st.subheader("Tỷ Trọng Cảm Xúc (NLP)")
+    if len(df[df['Video_Sentiment'] != "⚪ KHÔNG CÓ BÌNH LUẬN"]) > 0:
+        sentiment_counts = df['Video_Sentiment'].value_counts().reset_index()
+        sentiment_counts.columns = ['Video_Sentiment', 'Count']
     
-    # Cắt ngắn Caption
-    top_videos['Short_Caption'] = top_videos['Caption'].apply(lambda x: str(x)[:30] + "..." if pd.notna(x) else "Không có tiêu đề")
-    
-    # Ép thẻ HTML để biến text thành Link bấm được
-    top_videos['Clickable_Caption'] = top_videos.apply(lambda row: f"<a href='{row['Link']}'>{row['Short_Caption']}</a>", axis=1)
-    
-    fig_bar = px.bar(top_videos, x="Trend_Score", y="Clickable_Caption", orientation='h',
-                     color="Video_Sentiment", hover_data=["Views", "Likes", "Comments", "Link"],
-                     text="Trend_Score")
-                     
-    fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
-    st.plotly_chart(fig_bar, use_container_width=True)
+        fig_pie = px.pie(
+            sentiment_counts, 
+            values='Count', 
+            names='Video_Sentiment', 
+            hole=0.4,
+            color='Video_Sentiment',
+            color_discrete_map={
+                "🟢 TÍCH CỰC": "#00CC96",
+                "🔴 TIÊU CỰC / TRANH CÃI": "#EF553B",
+                "🟡 TRUNG LẬP": "#FFA15A",
+                "⚪ KHÔNG CÓ BÌNH LUẬN": "#333333" # Đổi màu xám tối cho đỡ chói mắt
+            }
+        )
+        fig_pie.update_layout(showlegend=False) # Ẩn legend cho gọn vì chữ đã nằm trên bánh
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
+    else:
+        st.info("💡 Bộ dữ liệu hiện tại tập trung vào chỉ số tương tác, không có dữ liệu văn bản để AI phân tích cảm xúc.")
 
 # ==========================================
-# PHẦN 5: AI TRÍCH XUẤT CỤM TỪ TRENDING (KeyBERT)
+# PHẦN 5: DỮ LIỆU ĐÀO SÂU DÀNH CHO NGƯỜI QUẢN TRỊ
 # ==========================================
 st.divider()
-st.subheader("🏷️ Top Cụm Từ Trending (KeyBERT AI)")
-st.caption("Sử dụng mô hình Transformer để phân tích ngữ nghĩa và bốc tách các cụm từ cốt lõi.")
-
-@st.cache_resource
-def load_kw_model():
-    return KeyBERT(model='paraphrase-multilingual-MiniLM-L12-v2')
-
-kb_model = load_kw_model()
-
-stop_words = [
-    'và', 'là', 'có', 'không', 'thì', 'mà', 'của', 'cho', 'với', 'để', 'một', 'những', 'các', 'cái', 'này', 'kia', 'rồi', 'như', 'được', 'trong', 'đã', 'đang', 'sẽ', 'nào', 'ai', 'gì', 'nha', 'nhé', 'ạ', 'ơi', 'đâu', 'đó', 'thế', 'ra', 'vào', 'lại', 'đi', 'đến', 'từ', 'người', 'mình', 'bạn', 'em', 'anh', 'chị', 'nó', 'tao', 'mày', 'video', 'clip', 'xem', 'nhiều', 'lắm', 'quá', 'thật', 'nữa', 'thôi', 'luôn', 'vậy', 'nhưng', 'khi', 'nếu', 'hay', 'còn', 'sao', 'cũng', 'con', 'ông', 'thấy', 'tôi', 'hết', 'phải', 'nhìn', 'chưa', 'tui', 'mới', 'làm', 'biết', 'chứ', 'đấy', 'cứ', 'lên', 'xuống', 'qua', 'thằng', 'bà', 'nói', 'đây', 'thích', 'the', 'this', 'is', 'you', 'for', 'that', 'how', 'que', 'and', 'with', 'my', 'in', 'of', 'it', 'to', 'on', 'me', 'sticker', 'fyp', 'viral', 'xuhuong', 'tiktok', 'trend', 'trending', 'capcut', 'xhtiktok', 'foryou', 'nhạc'
-]
-
-text_data = ""
-if 'Caption' in df.columns:
-    text_data += " ".join(df['Caption'].dropna().astype(str)) + " "
-    
-for i in range(1, 11):
-    col = f'Top{i}_Cmt'
-    if col in df.columns:
-        text_data += " ".join(df[col].dropna().astype(str)) + " "
-
-text_data = str(text_data).lower()
-text_data = re.sub(r'http\S+', '', text_data) 
-text_data = re.sub(r'[^\w\s\u0102-\u1EF9]', ' ', text_data) 
-
-if len(text_data.split()) > 10:
-    with st.spinner('AI đang quét ngữ nghĩa để tìm từ khóa...'):
-        keywords = kb_model.extract_keywords(text_data, 
-                                             keyphrase_ngram_range=(2, 3), 
-                                             stop_words=stop_words, 
-                                             top_n=15, 
-                                             use_mmr=True, diversity=0.3) 
-
-    if keywords:
-        df_words = pd.DataFrame(keywords, columns=['Cụm từ', 'Độ chuẩn xác (Relevance)'])
-        
-        fig_words = px.bar(df_words, x='Độ chuẩn xác (Relevance)', y='Cụm từ', orientation='h',
-                           color='Độ chuẩn xác (Relevance)', color_continuous_scale='Teal',
-                           text='Độ chuẩn xác (Relevance)')
-        fig_words.update_traces(texttemplate='%{text:.2f}', textposition='outside')
-        fig_words.update_layout(yaxis={'categoryorder':'total ascending'}) 
-        
-        st.plotly_chart(fig_words, use_container_width=True)
-    else:
-        st.info("Không tìm thấy cụm từ nổi bật.")
-else:
-    st.info("Chưa có đủ dữ liệu chữ để phân tích cụm từ.")
-
-# ==========================================
-# PHẦN 6: DỮ LIỆU THÔ DÀNH CHO CHUYÊN GIA
-# ==========================================
-with st.expander("📋 Xem dữ liệu chi tiết (Raw Data)"):
-    display_cols = ['Link', 'Trend_Score', 'Video_Sentiment', 'Views', 'Likes', 'Caption']
+with st.expander("📋 Xem dữ liệu chiến lược chi tiết (Bảng Raw Data)"):
+    display_cols = ['Link', 'Viral_Probability_%', 'Trend_Score', 'Video_Sentiment', 'Views', 'Likes', 'Comments', 'Shares', 'Saves', 'Display_Name']
     valid_cols = [col for col in display_cols if col in df.columns]
-    st.dataframe(df[valid_cols].sort_values(by="Trend_Score", ascending=False))
+    
+    # Định dạng lại bảng cho đẹp
+    st.dataframe(
+        df[valid_cols].sort_values(by="Viral_Probability_%", ascending=False),
+        column_config={
+            "Viral_Probability_%": st.column_config.ProgressColumn(
+                "Tỷ lệ Viral",
+                help="Xác suất video sẽ trở thành xu hướng dựa trên AI",
+                format="%.1f%%",
+                min_value=0,
+                max_value=100,
+            ),
+            "Link": st.column_config.LinkColumn("Nguồn Video")
+        },
+        use_container_width=True,
+        hide_index=True
+    )

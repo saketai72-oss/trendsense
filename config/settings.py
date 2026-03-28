@@ -1,11 +1,18 @@
 import os
+from dotenv import load_dotenv
 
 # Lấy đường dẫn gốc của toàn bộ dự án (Thư mục TRENDSENSE)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Đánh thức file .env dậy
+load_dotenv(os.path.join(BASE_DIR, '.env'))
+
 # Định nghĩa các thư mục cốt lõi
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 SRC_DIR = os.path.join(BASE_DIR, 'src')
+
+# --- BẢO MẬT & API KEYS ---
+HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
 # --- ĐƯỜNG DẪN CHO SCRAPER ---
 DB_DIR = os.path.join(DATA_DIR, 'db')

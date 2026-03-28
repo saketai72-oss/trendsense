@@ -30,7 +30,7 @@ def main():
     time.sleep(8)
 
     # 2. CUỘN TÌM LINK MỚI 
-    number_of_videos = 3
+    number_of_videos = 30
     links = []
     scroll_attempts = 0
     print(f"[*] Lướt tìm {number_of_videos} video mới toanh...")
