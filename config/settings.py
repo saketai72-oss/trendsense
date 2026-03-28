@@ -25,3 +25,9 @@ DRIVER_PATH = os.path.join(SRC_DIR, 'scraper', 'msedgedriver.exe')
 # --- ĐƯỜNG DẪN CHO DATA/AI ---
 RAW_FILE = os.path.join(DATA_DIR, 'raw', 'tiktok_full_raw.csv')
 PROCESSED_FILE = os.path.join(DATA_DIR, 'processed', 'tiktok_analyzed.csv')
+
+try:
+    os.makedirs(os.path.dirname(RAW_FILE), exist_ok=True)
+    os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
+except Exception as e:
+    pass
