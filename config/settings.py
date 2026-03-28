@@ -1,28 +1,20 @@
 import os
-from dotenv import load_dotenv
 
-# 1. ĐỊNH VỊ THƯ MỤC GỐC TỰ ĐỘNG
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__)) 
-PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+# Lấy đường dẫn gốc của toàn bộ dự án (Thư mục TRENDSENSE)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 2. TẢI BIẾN MÔI TRƯỜNG (.env)
-load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, ".env"))
+# Định nghĩa các thư mục cốt lõi
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+SRC_DIR = os.path.join(BASE_DIR, 'src')
 
-# 3. KẾT NỐI API KEYS
-APIFY_TOKEN = os.getenv("APIFY_API_TOKEN")
-HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+# --- ĐƯỜNG DẪN CHO SCRAPER ---
+DB_DIR = os.path.join(DATA_DIR, 'db')
+os.makedirs(DB_DIR, exist_ok=True)
 
-# 4. QUẢN LÝ ĐƯỜNG DẪN KHO DỮ LIỆU
-RAW_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
-PROCESSED_DIR = os.path.join(PROJECT_ROOT, "data", "processed")
+DB_FILE = os.path.join(DB_DIR, 'scraped_history.db')
+EDGE_PROFILE_DIR = os.path.join(DATA_DIR, 'edge_profile')
+DRIVER_PATH = os.path.join(SRC_DIR, 'scraper', 'msedgedriver.exe')
 
-# Tự động tạo thư mục nếu chưa có
-os.makedirs(RAW_DIR, exist_ok=True)
-os.makedirs(PROCESSED_DIR, exist_ok=True)
-
-RAW_FILE = os.path.join(RAW_DIR, "tiktok_full_raw.csv")
-PROCESSED_FILE = os.path.join(PROCESSED_DIR, "tiktok_analyzed.csv")
-
-# 5. CẤU HÌNH BOT CÀO DỮ LIỆU
-MAX_VIDEOS_TO_SCRAPE = 100
-TARGET_KEYWORDS = []
+# --- ĐƯỜNG DẪN CHO DATA/AI ---
+RAW_FILE = os.path.join(DATA_DIR, 'raw', 'tiktok_full_raw.csv')
+PROCESSED_FILE = os.path.join(DATA_DIR, 'processed', 'tiktok_analyzed.csv')

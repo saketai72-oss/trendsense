@@ -26,7 +26,7 @@ if __name__ == "__main__":
     # Định vị đường dẫn các module
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     
-    scraper_script = os.path.join(BASE_DIR, "src", "scraper", "apify_bot.py")
+    scraper_main = os.path.join(BASE_DIR, "src", "scraper", "scraper_main.py")
     nlp_script = os.path.join(BASE_DIR, "src", "ai_core", "nlp_model.py")
     predictive_script = os.path.join(BASE_DIR, "src", "ai_core", "predictive_model.py")
     app_script = os.path.join(BASE_DIR, "src", "dashboard", "app.py")
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     # BƯỚC 1: KÍCH HOẠT BOT CÀO DỮ LIỆU
     # ---------------------------------------------------------
-    run_script(scraper_script)
+    run_script(scraper_main)
     
     # ---------------------------------------------------------
     # BƯỚC 2: KÍCH HOẠT AI ĐỌC HIỂU & CHẤM ĐIỂM

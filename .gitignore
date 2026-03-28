@@ -5,7 +5,7 @@
 
 # Environment
 .env
-env/
+venv/
 # Python
 __pycache__/
 *.pyc
@@ -19,3 +19,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Trình duyệt & WebDriver
+edge_profile/
+msedgedriver.exe
