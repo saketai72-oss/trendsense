@@ -42,6 +42,6 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/
+          git add -f data/   
           git commit -m "🤖 AI tự động cập nhật data & dự báo [skip ci]" || echo "Không có data mới để lưu"
           git push
