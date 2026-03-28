@@ -1,28 +1,25 @@
 import os
 import sys
+from requests import options
 from selenium import webdriver
-from selenium.webdriver.edge.service import Service
-from selenium.webdriver.edge.options import Options
+from selenium.webdriver.chrome.options import Options
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from config import settings
 
 def init_driver():
-    service = Service(settings.DRIVER_PATH)
-    options = Options()
+    chrome_options = Options()
     
-    # Ẩn log rác & Tối ưu WebRTC
-    options.add_argument("--log-level=3")
-    options.add_argument("--disable-webrtc")
-    options.add_argument("--disable-features=WebRtcHideLocalIpsWithMdns")
+    # --- BỘ 3 QUY TẮC BẮT BUỘC ĐỂ CHẠY TRÊN GITHUB ACTIONS (LINUX) ---
+    chrome_options.add_argument('--headless=new')          
+    chrome_options.add_argument('--no-sandbox')            
+    chrome_options.add_argument('--disable-dev-shm-usage') 
+    
+    # --- Tùy chọn thêm để ngụy trang, tránh bị block ---
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--window-size=1920,1080')
+    chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-    # Xóa cờ Bot
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_argument("--disable-blink-features=AutomationControlled")
-
-    # Profile lưu Cookie
-    profile_path = os.path.join(os.getcwd(), "edge_profile")
-    options.add_argument(f"user-data-dir={profile_path}")
-
-    return webdriver.Edge(service=service, options=options)
+    # Khởi tạo bằng CHROME 
+    driver = webdriver.Chrome(options=chrome_options)
+    
+    return driver
