@@ -27,10 +27,13 @@ jobs:
       - name: 📦 Cài đặt thư viện (Requirements)
         run: pip install -r requirements.txt
 
-      - name: 🕷️ BƯỚC 1 - Kéo Data từ Hugging Face
-        env:
-          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }} # Lấy chìa khóa từ két sắt
-        run: python src/scraper/hf_bridge.py
+      - name: 🌐 Cài đặt Trình duyệt Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      - name: 🕷️ BƯỚC 1 - Bot Selenium cào data thực tế
+        run: python src/scraper/scraper_main.py
 
       - name: 🧠 BƯỚC 2 - AI chấm điểm cảm xúc (NLP)
         run: python src/ai_core/nlp_model.py
