@@ -3,6 +3,9 @@
 /*.csv
 /*.json
 
+!data/raw/tiktok_full_raw.csv
+!data/processed/tiktok_analyzed.csv
+
 # Environment
 .env
 venv/
@@ -19,6 +22,3 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Trình duyệt & WebDriver
-edge_profile/
-msedgedriver.exe
