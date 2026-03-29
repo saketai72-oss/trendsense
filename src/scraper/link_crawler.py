@@ -10,9 +10,10 @@ from config import settings
 def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
     links = []
     scroll_attempts = 0
+    MAX_SCROLLS = 200
     print(f"[*] Lướt tìm {target_count} video mới toanh...")
     
-    while len(links) < target_count and scroll_attempts < target_count:
+    while len(links) < target_count and scroll_attempts < MAX_SCROLLS:
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(2)
         
