@@ -31,3 +31,6 @@ try:
     os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
 except Exception as e:
     pass
+
+# === BIẾN TOÀN CỤC ĐIỀU KHIỂN SỐ LƯỢNG ===
+MAX_VIDEOS = 2

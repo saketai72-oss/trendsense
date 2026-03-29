@@ -1,43 +1,62 @@
 import undetected_chromedriver as uc
 import os
 import re
+import platform
 
 def get_chrome_version():
-    """Radar dò tìm phiên bản Chrome thực tế đang cài trên máy ảo Linux"""
+    """Radar thông minh: Tự nhận diện hệ điều hành để dò version Chrome"""
+    os_name = platform.system()
     try:
-        # Gõ lệnh vào Terminal của Linux để check version
-        output = os.popen('google-chrome --version').read()
-        # Output thường có dạng: "Google Chrome 146.0.7680.164"
-        match = re.search(r' (\d+)\.', output)
-        if match:
-            return int(match.group(1)) # Chỉ lấy 2-3 số đầu (VD: 146)
+        if os_name == 'Linux':
+            # Dò trên máy ảo Github
+            output = os.popen('google-chrome --version').read()
+            match = re.search(r' (\d+)\.', output)
+            if match:
+                return int(match.group(1))
+                
+        elif os_name == 'Windows':
+            # Dò trong Registry của máy tính cá nhân
+            output = os.popen('reg query "HKEY_CURRENT_USER\\Software\\Google\\Chrome\\BLBeacon" /v version').read()
+            match = re.search(r'version\s+REG_SZ\s+(\d+)\.', output)
+            if match:
+                return int(match.group(1))
     except Exception as e:
-        print(f"[!] Lỗi dò version: {e}")
+        print(f"[!] Lỗi radar dò version: {e}")
     return None
 
 def init_driver():
     options = uc.ChromeOptions()
     
-    # Giáp bảo vệ trên Linux
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    
-    # Ngụy trang User-Agent
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
 
-    # 1. Bật radar dò version
+    # 1. Bật radar thông minh
     v_main = get_chrome_version()
     if v_main:
-        print(f"[*] Máy ảo Github đang chạy Chrome phiên bản: {v_main}")
+        print(f"[*] Radar dò được Chrome phiên bản: {v_main} ({platform.system()})")
     else:
         print("[!] Không dò được version, nhắm mắt tải bừa bản mới nhất...")
 
-    # 2. Khởi tạo tàng hình với đúng version đã dò được
+    # 2. Hỗ trợ tìm file Chrome trên Windows (Chống lỗi Binary Location)
+    chrome_path = None
+    if platform.system() == 'Windows':
+        paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+        ]
+        for p in paths:
+            if os.path.exists(p):
+                chrome_path = p
+                break
+
+    # 3. Khởi tạo tàng hình
     driver = uc.Chrome(
         options=options,
+        browser_executable_path=chrome_path, # Tự động chèn nếu là Windows
         headless=True,
         use_subprocess=True,
-        version_main=v_main  
+        version_main=v_main
     )
     
     return driver

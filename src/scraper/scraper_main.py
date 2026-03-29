@@ -22,7 +22,7 @@ def main():
     time.sleep(8)
 
     # 1. Tìm danh sách link
-    links = get_trending_links(driver, target_count=30)
+    links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
     
     print("\n===== BẮT ĐẦU CÀO DỮ LIỆU =====\n")
     all_scraped_data = []

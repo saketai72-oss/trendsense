@@ -1,8 +1,13 @@
 import time
 from selenium.webdriver.common.by import By
 from database import is_scraped, extract_video_id
+import sys
+import os
 
-def get_trending_links(driver, target_count=30):
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from config import settings
+
+def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
     links = []
     scroll_attempts = 0
     print(f"[*] Lướt tìm {target_count} video mới toanh...")
