@@ -33,4 +33,4 @@ except Exception as e:
     pass
 
 # === BIẾN TOÀN CỤC ĐIỀU KHIỂN SỐ LƯỢNG ===
-MAX_VIDEOS = 30
+MAX_VIDEOS = 2

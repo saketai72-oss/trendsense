@@ -1,4 +1,4 @@
-name: 🤖 Tự động cào data và chạy AI
+name: 🤖 Tự động lấy data mới và chạy AI
 
 # Lên lịch chạy: Chạy mỗi 4 tiếng 1 lần và cho phép bấm chạy bằng tay
 on:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   run-ai-pipeline:
-    runs-on: ubuntu-latest # Thuê máy chủ Linux xịn nhất của Github
+    runs-on: ubuntu-latest 
 
     steps:
       - name: 📥 Kéo code từ kho về máy ảo
@@ -39,11 +39,8 @@ jobs:
       - name: 🕷️ BƯỚC 1 - Bot Selenium cào data thực tế
         run: python src/scraper/scraper_main.py
 
-      - name: 🧠 BƯỚC 2 - AI chấm điểm cảm xúc (NLP)
-        run: python src/ai_core/nlp_model.py
-
-      - name: 🚀 BƯỚC 3 - AI dự báo xu hướng Viral
-        run: python src/ai_core/predictive_model.py
+      - name: 🧠 BƯỚC 2 - AI Xử lý Ngôn ngữ & Dự báo Xu hướng
+        run: python src/ai_core/ai_core_main.py
 
       - name: 💾 Lưu và Nối đuôi dữ liệu
         run: |
@@ -51,4 +48,4 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add -f data/  # Ép Git nhận file dù có trong .gitignore
           git commit -m "🤖 AI cập nhật nối đuôi dữ liệu [skip ci]" || echo "Không có gì mới"
-          git push
+          git push origin main

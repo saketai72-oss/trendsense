@@ -10,7 +10,7 @@ from config import settings
 def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
     links = []
     scroll_attempts = 0
-    MAX_SCROLLS = 50
+    MAX_SCROLLS = 5
     print(f"[*] Lướt tìm {target_count} video mới toanh...")
     
     while len(links) < target_count and scroll_attempts < MAX_SCROLLS:
