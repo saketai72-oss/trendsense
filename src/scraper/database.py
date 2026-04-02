@@ -55,18 +55,25 @@ def init_db():
             video_sentiment TEXT,
             top_keywords TEXT,
             viral_probability REAL,
-            sentiment_analyzed INTEGER DEFAULT 0
+            sentiment_analyzed INTEGER DEFAULT 0,
+            category TEXT,
+            video_path TEXT
         )
     ''')
 
+    # Auto-migrate: thêm cột mới cho database cũ
+    for col, col_type in [('category', 'TEXT'), ('video_path', 'TEXT')]:
+        try:
+            cursor.execute(f'ALTER TABLE videos ADD COLUMN {col} {col_type}')
+        except sqlite3.OperationalError:
+            pass  # Cột đã tồn tại
+
     # Index cho truy vấn theo ngày (sliding window)
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)
-    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)')
     # Index cho truy vấn NLP cache
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_sentiment ON videos(sentiment_analyzed)
-    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sentiment ON videos(sentiment_analyzed)')
+    # Index cho truy vấn theo danh mục
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON videos(category)')
 
     conn.commit()
     conn.close()
@@ -256,3 +263,87 @@ def get_all_analyzed_videos():
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+# =====================================================
+# HÀM MỚI CHO CATEGORY & VIDEO DOWNLOAD
+# =====================================================
+
+def update_category(video_id, category):
+    """Ghi danh mục cho 1 video"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE videos SET category = ? WHERE video_id = ?', (category, video_id))
+    conn.commit()
+    conn.close()
+
+
+def update_categories_batch(category_list):
+    """Ghi danh mục cho nhiều video: [(category, video_id), ...]"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.executemany('UPDATE videos SET category = ? WHERE video_id = ?', category_list)
+    conn.commit()
+    conn.close()
+
+
+def update_video_path(video_id, video_path):
+    """Ghi đường dẫn file MP4 đã tải cho 1 video"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE videos SET video_path = ? WHERE video_id = ?', (video_path, video_id))
+    conn.commit()
+    conn.close()
+
+
+def get_videos_without_category():
+    """Lấy video chưa được gắn mác danh mục"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT video_id, link, caption FROM videos
+        WHERE (category IS NULL OR category = '' OR category = '🌍 Khác')
+        AND sentiment_analyzed = 1 AND views > 0
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_viral_videos_for_download(threshold=50):
+    """Lấy video viral chưa tải MP4"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT video_id, link FROM videos
+        WHERE viral_probability >= ?
+        AND (video_path IS NULL OR video_path = '')
+        AND views > 0
+    ''', (threshold,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_videos_with_expired_files(days):
+    """Lấy video có file MP4 cũ hơn N ngày (dựa trên scrape_date)"""
+    cutoff_date = (datetime.now() - timedelta(days=days)).date().isoformat()
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT video_id, video_path FROM videos
+        WHERE video_path IS NOT NULL AND video_path != ''
+        AND scrape_date < ?
+    ''', (cutoff_date,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def clear_video_path(video_id):
+    """Xoá đường dẫn video (sau khi xoá file thật)"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE videos SET video_path = NULL WHERE video_id = ?', (video_id,))
+    conn.commit()
+    conn.close()

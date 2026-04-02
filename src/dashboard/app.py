@@ -163,6 +163,16 @@ def load_data():
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
 
+    if 'category' not in df.columns:
+        df['category'] = 'Chưa phân loại'
+    else:
+        df['category'] = df['category'].fillna('Chưa phân loại')
+        
+    if 'video_path' not in df.columns:
+        df['has_video'] = '❌ Không'
+    else:
+        df['has_video'] = df['video_path'].apply(lambda x: '✅ Có' if pd.notna(x) and x != '' else '❌ Không')
+
     return df
 
 
@@ -246,11 +256,12 @@ st.plotly_chart(fig_viral, use_container_width=True)
 st.divider()
 st.markdown('<div class="section-header"><h3>🔬 Phân Tích Đa Chiều</h3></div>', unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🗺️ Bản Đồ Tương Tác",
     "📊 Phân Bổ Engagement",
     "⚡ Viral Velocity",
-    "📅 Timeline Thu Thập"
+    "📅 Timeline Thu Thập",
+    "🏷️ Phân Bổ Danh Mục"
 ])
 
 # --- TAB 1: Scatter Plot
@@ -390,6 +401,116 @@ with tab4:
         st.plotly_chart(fig_timeline, use_container_width=True)
     else:
         st.info("📅 Chưa có dữ liệu ngày thu thập.")
+
+# --- TAB 5: Phân Bổ Danh Mục
+with tab5:
+    if 'category' in df.columns:
+        cat_counts = df['category'].value_counts().reset_index()
+        cat_counts.columns = ['Danh Mục', 'Số Lượng']
+        fig_cat = px.pie(cat_counts, values='Số Lượng', names='Danh Mục', hole=0.4, title="Phân Bổ Kênh Theo Danh Mục")
+        fig_cat.update_traces(textposition='inside', textinfo='percent+label')
+        fig_cat.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#a0aec0')
+        st.plotly_chart(fig_cat, use_container_width=True)
+    else:
+        st.info("🏷️ Chưa có dữ liệu phân loại danh mục.")
+
+
+# ==========================================
+# PHẦN 3.5: TỐC ĐỘ VIRAL THEO DANH MỤC GẦN ĐÂY
+# ==========================================
+st.divider()
+st.markdown('<div class="section-header"><h3>🔥 Tốc Độ Viral Theo Danh Mục — Gần Đây</h3></div>', unsafe_allow_html=True)
+st.caption("So sánh tốc độ viral trung bình của từng danh mục theo các ngày thu thập gần nhất.")
+
+if 'category' in df.columns and 'scrape_date' in df.columns and df['scrape_date'].notna().any():
+    # Lấy tối đa 7 ngày gần nhất
+    recent_dates = sorted(df['scrape_date'].dropna().unique(), reverse=True)[:7]
+    df_recent = df[df['scrape_date'].isin(recent_dates)].copy()
+
+    col_cv1, col_cv2 = st.columns([3, 2])
+
+    with col_cv1:
+        # Grouped Bar: Trung bình viral_velocity theo category × scrape_date
+        cat_date_vel = df_recent.groupby(['category', 'scrape_date']).agg(
+            avg_velocity=('viral_velocity', 'mean'),
+            avg_viral=('viral_probability', 'mean'),
+            count=('video_id', 'count')
+        ).reset_index()
+
+        fig_cv_bar = px.bar(
+            cat_date_vel,
+            x='scrape_date', y='avg_velocity', color='category',
+            barmode='group',
+            hover_data={'avg_viral': ':.1f', 'count': True},
+            labels={
+                'scrape_date': 'Ngày Thu Thập',
+                'avg_velocity': 'Avg Viral Velocity',
+                'category': 'Danh Mục',
+                'avg_viral': 'Avg Viral %',
+                'count': 'Số Video'
+            },
+            title="Tốc Độ Viral Trung Bình Theo Danh Mục & Ngày",
+            color_discrete_sequence=px.colors.qualitative.Vivid
+        )
+        fig_cv_bar.update_layout(
+            height=480,
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font_color='#a0aec0',
+            legend=dict(orientation='h', y=-0.25),
+            xaxis=dict(gridcolor='#2d2d44'),
+            yaxis=dict(gridcolor='#2d2d44')
+        )
+        st.plotly_chart(fig_cv_bar, use_container_width=True)
+
+    with col_cv2:
+        # Heatmap: Category vs Date → Avg Viral Velocity
+        heatmap_data = df_recent.pivot_table(
+            index='category', columns='scrape_date',
+            values='viral_velocity', aggfunc='mean'
+        ).fillna(0)
+
+        fig_heatmap = go.Figure(data=go.Heatmap(
+            z=heatmap_data.values,
+            x=heatmap_data.columns.tolist(),
+            y=heatmap_data.index.tolist(),
+            colorscale=[[0, '#1a1a2e'], [0.35, '#16213e'], [0.6, '#e94560'], [1, '#ff6b6b']],
+            hovertemplate='Danh mục: %{y}<br>Ngày: %{x}<br>Avg Velocity: %{z:.1f}<extra></extra>'
+        ))
+        fig_heatmap.update_layout(
+            title="Heatmap: Viral Velocity × Danh Mục × Ngày",
+            height=480,
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font_color='#a0aec0',
+            xaxis=dict(title='Ngày', gridcolor='#2d2d44'),
+            yaxis=dict(title='', gridcolor='#2d2d44', autorange='reversed')
+        )
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+
+    # Bảng xếp hạng danh mục nóng nhất hiện tại
+    st.markdown("**🏆 Bảng Xếp Hạng Danh Mục Nóng Nhất (Gần Đây)**")
+    cat_rank = df_recent.groupby('category').agg(
+        avg_velocity=('viral_velocity', 'mean'),
+        avg_viral=('viral_probability', 'mean'),
+        avg_engagement=('engagement_rate', 'mean'),
+        total_views=('views', 'sum'),
+        video_count=('video_id', 'count')
+    ).sort_values('avg_velocity', ascending=False).reset_index()
+
+    cat_rank.columns = ['🏷️ Danh Mục', '🚀 Avg Velocity', '🔥 Avg Viral %',
+                        '📈 Avg Engagement %', '👁️ Tổng Views', '📹 Số Video']
+
+    st.dataframe(
+        cat_rank,
+        column_config={
+            '🚀 Avg Velocity': st.column_config.NumberColumn(format='%.1f'),
+            '🔥 Avg Viral %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+            '📈 Avg Engagement %': st.column_config.NumberColumn(format='%.1f'),
+            '👁️ Tổng Views': st.column_config.NumberColumn(format='%d'),
+        },
+        use_container_width=True, hide_index=True
+    )
+else:
+    st.info("📅 Cần có cả danh mục và ngày thu thập để hiển thị phần này.")
 
 
 # ==========================================
@@ -537,7 +658,9 @@ for _, video in top_for_comments.iterrows():
                 [f'<span class="keyword-tag">{k.strip().replace("_"," ")}</span>'
                  for k in str(video['top_keywords']).split(',') if k.strip()]
             )
-            st.markdown(f"🏷️ {kw_tags}", unsafe_allow_html=True)
+            st.markdown(f"🏷️ **Từ khoá:** {kw_tags}", unsafe_allow_html=True)
+            
+        st.markdown(f"**Danh mục:** {video.get('category', 'Chưa phân loại')} | **Trạng thái MP4:** {video.get('has_video', '❌ Không')}")
 
 
 # ==========================================
@@ -580,7 +703,7 @@ st.divider()
 st.markdown('<div class="section-header"><h3>📋 Bảng Dữ Liệu Chiến Lược Đầy Đủ</h3></div>', unsafe_allow_html=True)
 
 # Bộ lọc
-col_f1, col_f2, col_f3 = st.columns(3)
+col_f1, col_f2, col_f3, col_f4 = st.columns(4)
 with col_f1:
     sentiment_filter = st.multiselect(
         "Lọc theo Cảm Xúc:",
@@ -588,8 +711,14 @@ with col_f1:
         default=df['video_sentiment'].unique().tolist()
     )
 with col_f2:
-    min_viral = st.slider("Viral Probability tối thiểu:", 0.0, 100.0, 0.0, 1.0)
+    category_filter = st.multiselect(
+        "Lọc theo Danh Mục:",
+        df['category'].unique().tolist(),
+        default=df['category'].unique().tolist()
+    )
 with col_f3:
+    min_viral = st.slider("Viral Probability tối thiểu:", 0.0, 100.0, 0.0, 1.0)
+with col_f4:
     sort_col = st.selectbox("Sắp xếp theo:", [
         "viral_probability", "views", "likes", "engagement_rate",
         "viral_velocity", "views_per_hour", "positive_score"
@@ -597,16 +726,17 @@ with col_f3:
 
 df_filtered = df[
     (df['video_sentiment'].isin(sentiment_filter)) &
+    (df['category'].isin(category_filter)) &
     (df['viral_probability'] >= min_viral)
 ].sort_values(by=sort_col, ascending=False)
 
 st.caption(f"Hiển thị {len(df_filtered)} / {len(df)} video")
 
 display_cols = [
-    'link', 'Display_Name', 'viral_probability', 'video_sentiment',
+    'link', 'Display_Name', 'category', 'viral_probability', 'video_sentiment',
     'views', 'likes', 'comments', 'shares', 'saves',
     'views_per_hour', 'engagement_rate', 'viral_velocity', 'positive_score',
-    'top_keywords', 'scrape_date'
+    'top_keywords', 'has_video', 'scrape_date'
 ]
 valid_cols = [col for col in display_cols if col in df_filtered.columns]
 
@@ -621,6 +751,8 @@ st.dataframe(
         ),
         "link": st.column_config.LinkColumn("🔗 Link"),
         "Display_Name": "📹 Video",
+        "category": "🏷️ Danh Mục",
+        "has_video": "🎬 Đã Tải MP4",
         "video_sentiment": "💭 Cảm Xúc",
         "views": st.column_config.NumberColumn("👁️ Views", format="%d"),
         "likes": st.column_config.NumberColumn("❤️ Likes", format="%d"),

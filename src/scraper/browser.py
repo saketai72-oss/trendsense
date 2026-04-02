@@ -3,6 +3,16 @@ import os
 import re
 import platform
 
+# Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" và [WinError 6] The handle is invalid trên Windows
+if hasattr(uc.Chrome, '__del__'):
+    _original_del = uc.Chrome.__del__
+    def _safe_del(self):
+        try:
+            _original_del(self)
+        except OSError:
+            pass
+    uc.Chrome.__del__ = _safe_del
+
 def get_chrome_version():
     """Radar thông minh: Tự nhận diện hệ điều hành để dò version Chrome"""
     os_name = platform.system()

@@ -4,12 +4,16 @@ import time
 from datetime import datetime
 
 from browser import init_driver
-from database import init_db, extract_video_id, mark_as_scraped, save_video
+from database import init_db, extract_video_id, mark_as_scraped, save_video, update_category
 from link_crawler import get_trending_links
 from content_parser import extract_basic_stats, extract_top_comments
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import settings
+
+# Import categorizer
+sys.path.append(os.path.join(settings.SRC_DIR, 'ai_core'))
+from categorizer import categorize_video
 
 
 def main():
@@ -72,6 +76,11 @@ def main():
             save_video(video_id, video_data)
             saved_count += 1
             print(f"  [✓] Đã lưu video {video_id} vào SQLite.")
+
+            # Gắn mác danh mục ngay (rule-based, cực nhanh)
+            category = categorize_video(video_id, stats['Caption'])
+            update_category(video_id, category)
+            print(f"  [🏷️] Danh mục: {category}")
 
     # 4. Dọn dẹp
     print("\n[*] Đang đóng trình duyệt...")

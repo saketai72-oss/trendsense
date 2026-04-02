@@ -39,6 +39,19 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 MODEL_PATH = os.path.join(MODEL_DIR, 'rf_model.joblib')
 METRICS_PATH = os.path.join(MODEL_DIR, 'metrics.json')
 
+# --- ĐƯỜNG DẪN CHO VIDEO DOWNLOAD ---
+VIDEOS_DIR = os.path.join(DATA_DIR, 'videos')
+os.makedirs(VIDEOS_DIR, exist_ok=True)
+
 # === BIẾN TOÀN CỤC ĐIỀU KHIỂN ===
 MAX_VIDEOS = 30
 SLIDING_WINDOW_DAYS = 14  # Chỉ train trên data 2 tuần gần nhất
+
+# --- CẤU HÌNH TẢI VIDEO ---
+DOWNLOAD_VIDEOS = True          # Bật/tắt tải video MP4
+DOWNLOAD_VIRAL_ONLY = True      # Chỉ tải video Viral (>50%)
+VIRAL_DOWNLOAD_THRESHOLD = 50   # Ngưỡng % để kích hoạt tải
+VIDEO_RETENTION_DAYS = 7        # Tự động xoá video cũ hơn N ngày
+
+# --- CẤU HÌNH PHÂN LOẠI DANH MỤC ---
+ZERO_SHOT_MODEL = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"

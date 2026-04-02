@@ -17,13 +17,15 @@ from config import settings
 # Nạp database
 sys.path.append(os.path.join(settings.SRC_DIR, 'scraper'))
 from database import init_db, get_unanalyzed_videos, update_sentiment, \
-    update_predictions_batch, get_all_analyzed_videos
+    update_predictions_batch, get_all_analyzed_videos, \
+    get_videos_without_category, update_categories_batch
 
 # Nạp các module AI tự viết
 from math_utils import calculate_metrics
 from nlp_utils import clean_text, extract_keywords
 from sentiment_engine import analyze_batch
 from prediction_engine import run_viral_prediction
+from categorizer import categorize_by_ai
 
 
 def process_new_videos():
@@ -157,6 +159,29 @@ def process_new_videos():
         for word, count in global_word_counter.most_common(15):
             print(f"   - {word.replace('_', ' ')}: {count} lần")
         print("=" * 40)
+
+    # 7. Zero-shot AI cho video chưa gắn mác (hoặc đang là "🌍 Khác")
+    uncategorized = get_videos_without_category()
+    if uncategorized:
+        print(f"\n🧠 AI Zero-shot: Phân loại {len(uncategorized)} video chưa gắn mác...")
+        captions_with_ids = [(v['video_id'], v['caption']) for v in uncategorized]
+        ai_categories = categorize_by_ai(captions_with_ids)
+        if ai_categories:
+            update_categories_batch(ai_categories)
+            print(f"[✓] Đã gắn mác AI cho {len(ai_categories)} video.")
+    else:
+        print("[✓] Tất cả video đã có danh mục.")
+
+    # 8. Tải video viral + dọn dẹp video cũ
+    try:
+        sys.path.append(os.path.join(settings.SRC_DIR, 'scraper'))
+        from video_downloader import download_viral_videos, cleanup_old_videos
+        download_viral_videos()
+        cleanup_old_videos()
+    except ImportError:
+        print("[!] Thiếu yt-dlp, bỏ qua bước tải video.")
+    except Exception as e:
+        print(f"[!] Lỗi khi tải/dọn video: {e}")
 
     print(f"\n✅ AI CORE HOÀN TẤT! Đã xử lý {len(new_videos)} video mới.")
 

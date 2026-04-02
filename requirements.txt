@@ -13,6 +13,9 @@ transformers==4.38.2
 torch==2.2.1
 joblib
 
+# --- Tải Video ---
+yt-dlp
+
 # --- Web Dashboard ---
 streamlit==1.32.0
 plotly==5.15.0
