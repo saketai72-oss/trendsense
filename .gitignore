@@ -1,10 +1,14 @@
-# Data
-/data/
+# Data — KHÔNG push lên GitHub (trừ model)
+/data/db/
+/data/raw/
+/data/processed/
+/data/edge_profile/
 /*.csv
-/*.json
 
-!data/raw/tiktok_full_raw.csv
-!data/processed/tiktok_analyzed.csv
+# Model AI — CÓ push lên GitHub
+!data/models/
+!data/models/rf_model.joblib
+!data/models/metrics.json
 
 # Environment
 .env
@@ -21,4 +25,3 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
-

@@ -7,13 +7,11 @@ def run_script(script_path, is_streamlit=False):
     print(f"\n{'='*60}")
     print(f"🚀 ĐANG CHẠY: {script_path}")
     print(f"{'='*60}\n")
-    
+
     try:
         if is_streamlit:
-            # Lệnh dành riêng cho Streamlit
             subprocess.run([sys.executable, "-m", "streamlit", "run", script_path], check=True)
         else:
-            # Lệnh chạy file Python bình thường
             subprocess.run([sys.executable, script_path], check=True)
     except subprocess.CalledProcessError as e:
         print(f"\n[!] ❌ HỆ THỐNG PHÁT HIỆN LỖI KHI CHẠY: {script_path}")
@@ -22,32 +20,25 @@ def run_script(script_path, is_streamlit=False):
 
 if __name__ == "__main__":
     print("🌟 BẮT ĐẦU KHỞI ĐỘNG HỆ THỐNG TỰ ĐỘNG TRENDSENSE 🌟")
-    
-    # Định vị đường dẫn các module
+
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    
+
     scraper_main = os.path.join(BASE_DIR, "src", "scraper", "scraper_main.py")
-    nlp_script = os.path.join(BASE_DIR, "src", "ai_core", "nlp_model.py")
-    predictive_script = os.path.join(BASE_DIR, "src", "ai_core", "predictive_model.py")
+    ai_core_main = os.path.join(BASE_DIR, "src", "ai_core", "ai_core_main.py")
     app_script = os.path.join(BASE_DIR, "src", "dashboard", "app.py")
-    
+
     # ---------------------------------------------------------
-    # BƯỚC 1: KÍCH HOẠT BOT CÀO DỮ LIỆU
+    # BƯỚC 1: KÍCH HOẠT BOT CÀO DỮ LIỆU → GHI VÀO SQLITE
     # ---------------------------------------------------------
     run_script(scraper_main)
-    
+
     # ---------------------------------------------------------
-    # BƯỚC 2: KÍCH HOẠT AI ĐỌC HIỂU & CHẤM ĐIỂM
+    # BƯỚC 2: AI CORE — NLP (chỉ video mới) + PREDICT (model sẵn)
     # ---------------------------------------------------------
-    run_script(nlp_script)
-    
+    run_script(ai_core_main)
+
     # ---------------------------------------------------------
-    # BƯỚC 3: KÍCH HOẠT MÔ HÌNH DỰ BÁO
-    # ---------------------------------------------------------
-    run_script(predictive_script)
-    
-    # ---------------------------------------------------------
-    # BƯỚC 4: MỞ TRANG TỔNG QUAN (DASHBOARD)
+    # BƯỚC 3: MỞ TRANG TỔNG QUAN (DASHBOARD)
     # ---------------------------------------------------------
     print("\n🎉 DỮ LIỆU ĐÃ CẬP NHẬT HOÀN TẤT! ĐANG MỞ DASHBOARD...\n")
     run_script(app_script, is_streamlit=True)

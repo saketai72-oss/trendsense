@@ -1,17 +1,16 @@
 import sys
 import os
 import time
+from datetime import datetime
 
 from browser import init_driver
-from database import init_db, extract_video_id, mark_as_scraped
-from csv_handler import save_to_csv
+from database import init_db, extract_video_id, mark_as_scraped, save_video
 from link_crawler import get_trending_links
 from content_parser import extract_basic_stats, extract_top_comments
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import settings
 
-CSV_FILE = settings.RAW_FILE
 
 def main():
     init_db()
@@ -23,9 +22,10 @@ def main():
 
     # 1. Tìm danh sách link
     links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
-    
+
     print("\n===== BẮT ĐẦU CÀO DỮ LIỆU =====\n")
-    all_scraped_data = []
+    today = datetime.now().date().isoformat()
+    saved_count = 0
 
     # 2. Xử lý từng link
     for i, link in enumerate(links, 1):
@@ -35,43 +35,57 @@ def main():
 
         # Bóc tách các chỉ số cơ bản
         stats = extract_basic_stats(driver.page_source)
-        
+
         # Bóc tách Top 5 bình luận
         has_comments = stats['Comments'] > 0
         top_5_comments = extract_top_comments(driver, has_comments)
 
-        # 3. Đóng gói dữ liệu
+        # 3. Đóng gói dữ liệu và ghi vào SQLite
         video_id = extract_video_id(link)
         if video_id:
             mark_as_scraped(video_id)
             print(f"  [*] Đã cất ID {video_id} vào kho chống trùng.")
-            
-            row_data = {
-                'Link': link,
-                'Create_Time': stats['Create_Time'],
-                'Caption': stats['Caption'],
-                'Views': stats['Views'],   
-                'Likes': stats['Likes'],
-                'Comments': stats['Comments'],
-                'Shares': stats['Shares'],
-                'Saves': stats['Saves']    
+
+            # Chuẩn bị data cho SQLite
+            video_data = {
+                'link': link,
+                'create_time': stats['Create_Time'],
+                'caption': stats['Caption'],
+                'views': stats['Views'],
+                'likes': stats['Likes'],
+                'comments': stats['Comments'],
+                'shares': stats['Shares'],
+                'saves': stats['Saves'],
+                'scrape_date': today,
             }
-            
+
+            # Gắn top comments
             for idx in range(5):
                 if idx < len(top_5_comments):
-                    row_data[f'Top{idx+1}_Cmt'] = top_5_comments[idx]['text']
-                    row_data[f'Top{idx+1}_Likes'] = top_5_comments[idx]['likes_num']
+                    video_data[f'top{idx+1}_cmt'] = top_5_comments[idx]['text']
+                    video_data[f'top{idx+1}_likes'] = top_5_comments[idx]['likes_num']
                 else:
-                    row_data[f'Top{idx+1}_Cmt'] = ""
-                    row_data[f'Top{idx+1}_Likes'] = 0
-                    
-            all_scraped_data.append(row_data)
-            print(f"  [*] Đã gom video {video_id} vào danh sách chờ.")
+                    video_data[f'top{idx+1}_cmt'] = ""
+                    video_data[f'top{idx+1}_likes'] = 0
+
+            # Ghi vào SQLite
+            save_video(video_id, video_data)
+            saved_count += 1
+            print(f"  [✓] Đã lưu video {video_id} vào SQLite.")
+
+    # 4. Dọn dẹp
+    print("\n[*] Đang đóng trình duyệt...")
+    try:
+        driver.quit()
+    except Exception as e:
+        # Lỗi handle invalid trên Windows thường không gây hại, ta có thể bỏ qua
+        pass
+
+    if saved_count == 0 and len(links) > 0:
+        print("[!] CẢNH BÁO: Tìm thấy link nhưng không lưu được video nào. Có thể do bị trùng ID hoàn toàn trong DB.")
     
-    # 4. Lưu và dọn dẹp
-    driver.quit()
-    save_to_csv(all_scraped_data, CSV_FILE)
-    print("\n[+] ĐÃ XONG MẺ CÀO NÀY!")
+    print(f"\n[+] ĐÃ XONG MẺ CÀO NÀY! Lưu {saved_count} video vào database.")
+
 
 if __name__ == "__main__":
     main()

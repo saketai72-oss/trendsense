@@ -27,18 +27,22 @@ def get_chrome_version():
 def init_driver():
     options = uc.ChromeOptions()
     
+    # 1. Tối ưu cấu hình ẩn danh (CHỐNG WINERROR 6 & TikTok detection)
+    options.add_argument('--headless=new') 
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
 
-    # 1. Bật radar thông minh
+    # 2. Radar dò tìm phiên bản Chrome để khớp Driver
     v_main = get_chrome_version()
     if v_main:
         print(f"[*] Radar dò được Chrome phiên bản: {v_main} ({platform.system()})")
     else:
         print("[!] Không dò được version, nhắm mắt tải bừa bản mới nhất...")
 
-    # 2. Hỗ trợ tìm file Chrome trên Windows (Chống lỗi Binary Location)
+    # 3. Hỗ trợ tìm file Chrome trên Windows (Chống lỗi Binary Location)
     chrome_path = None
     if platform.system() == 'Windows':
         paths = [
@@ -53,8 +57,7 @@ def init_driver():
     # 3. Khởi tạo tàng hình
     driver = uc.Chrome(
         options=options,
-        browser_executable_path=chrome_path, # Tự động chèn nếu là Windows
-        headless=True,
+        browser_executable_path=chrome_path,
         use_subprocess=True,
         version_main=v_main
     )

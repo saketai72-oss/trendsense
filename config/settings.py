@@ -32,5 +32,13 @@ try:
 except Exception as e:
     pass
 
-# === BIẾN TOÀN CỤC ĐIỀU KHIỂN SỐ LƯỢNG ===
+# --- ĐƯỜNG DẪN CHO MODEL AI ---
+MODEL_DIR = os.path.join(DATA_DIR, 'models')
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+MODEL_PATH = os.path.join(MODEL_DIR, 'rf_model.joblib')
+METRICS_PATH = os.path.join(MODEL_DIR, 'metrics.json')
+
+# === BIẾN TOÀN CỤC ĐIỀU KHIỂN ===
 MAX_VIDEOS = 30
+SLIDING_WINDOW_DAYS = 14  # Chỉ train trên data 2 tuần gần nhất

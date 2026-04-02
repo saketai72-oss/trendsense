@@ -1,73 +1,63 @@
+"""
+Prediction Engine — Chế độ INFERENCE ONLY.
+Load model đã train sẵn và chỉ predict, không train lại.
+"""
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from config import settings
+
+from model_manager import load_model
+
+FEATURES = ['Like_Rate', 'Comment_Rate', 'Share_Rate', 'Save_Rate', 'Positive_Score', 'Views_Per_Hour']
+
 
 def run_viral_prediction(df):
-    print("\n[🚀] KHỞI ĐỘNG MÔ HÌNH DỰ BÁO XU HƯỚNG TƯƠNG LAI...")
+    """Dự đoán xác suất viral — CHỈ INFERENCE, KHÔNG TRAIN."""
+    print("\n[🚀] KHỞI ĐỘNG MÔ HÌNH DỰ BÁO (INFERENCE MODE)...")
 
-    # 1. Làm sạch dữ liệu đầu vào
-    df = df[df['Views'] > 0].copy()
+    # 1. Lọc data hợp lệ
+    df = df[df['views'] > 0].copy()
 
-    if len(df) < 5:
-        print(f"[!] ⚠️ Dữ liệu quá ít ({len(df)} video). AI cần ít nhất 5-10 video để phân tích.")
-        print(" 👉 Bỏ qua bước dự đoán. Sẽ lưu dữ liệu cơ bản.")
+    if len(df) == 0:
+        print("[!] Không có video hợp lệ để dự đoán.")
         return df
 
     # 2. Feature Engineering
-    df['Like_Rate'] = df['Likes'] / df['Views']
-    df['Comment_Rate'] = df['Comments'] / df['Views']
-    df['Share_Rate'] = df['Shares'] / df['Views']
-    df['Save_Rate'] = df['Saves'] / df['Views']
+    df['Like_Rate'] = df['likes'] / df['views']
+    df['Comment_Rate'] = df['comments'] / df['views']
+    df['Share_Rate'] = df['shares'] / df['views']
+    df['Save_Rate'] = df['saves'] / df['views']
+    df['Positive_Score'] = df['positive_score'].fillna(0)
+    df['Views_Per_Hour'] = df['views_per_hour'].fillna(0)
 
     df.replace([np.inf, -np.inf], 0, inplace=True)
+    df[FEATURES] = df[FEATURES].fillna(0)
 
-    features = ['Like_Rate', 'Comment_Rate', 'Share_Rate', 'Save_Rate', 'Positive_Score', 'Views_Per_Hour']
-    df[features] = df[features].fillna(0)
-
-    # 3. Gắn nhãn mục tiêu (Sử dụng Viral_Velocity thay cho Trend_Score cũ)
-    threshold = df['Viral_Velocity'].quantile(0.80)
-    if threshold <= 0: threshold = 0.001 
-
-    df['Is_Future_Trend'] = (df['Viral_Velocity'] >= threshold).astype(int)
-
-    if len(df['Is_Future_Trend'].unique()) < 2:
-        print("[!] ⚠️ Dữ liệu chưa đủ độ phân hoá (toàn video flop hoặc toàn video siêu trend).")
-        print("[*] AI gán tỷ lệ bùng nổ mặc định là 5.0%.")
-        df['Viral_Probability_%'] = 5.0
+    # 3. Load model đã train sẵn
+    model = load_model()
+    if model is None:
+        print("[!] ⚠️ Chưa có model. Gán xác suất mặc định 5.0%.")
+        print("    → Chạy 'python src/ai_core/train_model.py' để tạo model.")
+        df['viral_probability'] = 5.0
         return df
 
-    # 4. Huấn luyện mô hình
-    X = df[features]
-    y = df['Is_Future_Trend']
-
+    # 4. CHỈ PREDICT — Không train
+    X = df[FEATURES]
     try:
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-        print(f"[*] Đang huấn luyện AI ngầm trên {len(X_train)} mẫu...")
-        
-        rf_model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
-        rf_model.fit(X_train, y_train)
-        y_pred = rf_model.predict(X_test)
-        
-        if len(y_test.unique()) == 2:
-            print("\n📊 BÁO CÁO ĐỘ CHÍNH XÁC (TESTING):")
-            print(classification_report(y_test, y_pred, target_names=['Bình thường', 'SẼ THÀNH TREND'], zero_division=0))
-            
-    except ValueError:
-        print("[!] ⚠️ Tập dữ liệu nhỏ, AI học nén trên toàn bộ dữ liệu (không qua test).")
-        rf_model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
-        rf_model.fit(X, y)
+        probabilities = model.predict_proba(X)[:, 1]
+        df['viral_probability'] = np.round(probabilities * 100, 2)
+        print(f"[✓] Đã predict xác suất viral cho {len(df)} video.")
+    except Exception as e:
+        print(f"[!] Lỗi khi predict: {e}")
+        print("    → Model có thể không tương thích. Chạy lại train_model.py.")
+        df['viral_probability'] = 5.0
 
-    # 5. Dự đoán và xuất kết quả
-    probabilities = rf_model.predict_proba(X)[:, 1] 
-    df['Viral_Probability_%'] = np.round(probabilities * 100, 2)
-
-    print("[*] XONG! Đã cấy thành công cột 'Viral_Probability_%' vào dữ liệu.")
-    
-    # Dọn dẹp bớt các cột trung gian không cần thiết xuất ra CSV (tuỳ chọn)
-    cols_to_drop = ['Like_Rate', 'Comment_Rate', 'Share_Rate', 'Save_Rate', 'Is_Future_Trend']
+    # 5. Dọn cột trung gian
+    cols_to_drop = ['Like_Rate', 'Comment_Rate', 'Share_Rate', 'Save_Rate']
     df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
 
-    # Trả về dataframe đã sắp xếp theo tỷ lệ viral giảm dần
-    return df.sort_values(by='Viral_Probability_%', ascending=False)
+    return df.sort_values(by='viral_probability', ascending=False)
