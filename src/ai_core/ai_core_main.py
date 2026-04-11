@@ -21,18 +21,17 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 from config import settings
 
 # Nạp database
-sys.path.append(os.path.join(settings.SRC_DIR, 'scraper'))
-from database import init_db, get_unanalyzed_videos, update_sentiment, \
+from src.scraper.database import init_db, get_unanalyzed_videos, update_sentiment, \
     update_predictions_batch, get_all_analyzed_videos, \
     get_videos_without_category, update_categories_batch, reset_all_analysis_status, \
     get_videos_with_khac_category, update_category
 
 # Nạp các module AI tự viết
-from math_utils import calculate_metrics
-from nlp_utils import clean_text, extract_keywords, extract_smart_keywords
-from sentiment_engine import analyze_batch
-from prediction_engine import run_viral_prediction
-from categorizer import categorize_by_ai
+from src.ai_core.math_utils import calculate_metrics
+from src.ai_core.nlp_utils import clean_text, extract_keywords, extract_smart_keywords
+from src.ai_core.sentiment_engine import analyze_batch
+from src.ai_core.prediction_engine import run_viral_prediction
+from src.ai_core.categorizer import categorize_by_ai
 
 
 # =====================================================
@@ -114,7 +113,7 @@ def force_reclassify_khac_videos():
 
     # --- Bước 1: Tải video chưa có MP4 ---
     try:
-        from video_downloader import download_for_khac_category
+        from src.scraper.video_downloader import download_for_khac_category
         khac_videos = download_for_khac_category()
     except Exception as e:
         print(f"    [!] Lỗi tải video Khác: {e}")
@@ -253,7 +252,7 @@ def refresh_smart_keywords_for_top_viral(top_n=20):
         if smart_kws:
             kw_str = ", ".join(smart_kws[:5])  # Tối đa 5 từ khóa
             # Cập nhật vào DB
-            from database import _get_conn
+            from src.scraper.database import _get_conn
             conn = _get_conn()
             conn.execute('UPDATE videos SET top_keywords = ? WHERE video_id = ?', (kw_str, vid))
             conn.commit()
@@ -429,7 +428,7 @@ def _run_post_processing():
 
     # 8. Tải video viral + dọn dẹp video cũ
     try:
-        from video_downloader import download_viral_videos, cleanup_old_videos
+        from src.scraper.video_downloader import download_viral_videos, cleanup_old_videos
         download_viral_videos()
         cleanup_old_videos()
     except ImportError:
@@ -439,7 +438,7 @@ def _run_post_processing():
 
     # 9. Multimodal AI — Phân tích nội dung video toàn diện
     try:
-        from multimodal_engine import run_multimodal_analysis
+        from src.ai_core.multimodal_engine import run_multimodal_analysis
         run_multimodal_analysis()
     except ImportError as e:
         print(f"[!] Thiếu thư viện Multimodal AI (whisper/easyocr/moviepy), bỏ qua: {e}")

@@ -12,8 +12,7 @@ from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import settings
 
-sys.path.append(os.path.join(settings.SRC_DIR, 'scraper'))
-from database import (
+from src.scraper.database import (
     get_viral_videos_for_download, get_all_videos_for_download, update_video_path,
     get_videos_with_expired_files, clear_video_path,
     get_videos_with_khac_category, mark_video_download_failed

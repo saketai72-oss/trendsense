@@ -3,17 +3,16 @@ import os
 import time
 from datetime import datetime
 
-from browser import init_driver
-from database import init_db, extract_video_id, mark_as_scraped, save_video, update_category
-from link_crawler import get_trending_links
-from content_parser import extract_basic_stats, extract_top_comments
+from src.scraper.browser import init_driver
+from src.scraper.database import init_db, extract_video_id, mark_as_scraped, save_video, update_category
+from src.scraper.link_crawler import get_trending_links
+from src.scraper.content_parser import extract_basic_stats, extract_top_comments
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import settings
 
 # Import categorizer
-sys.path.append(os.path.join(settings.SRC_DIR, 'ai_core'))
-from categorizer import categorize_video
+from src.ai_core.categorizer import categorize_video
 
 
 def main():

@@ -216,8 +216,7 @@ def analyze_multimodal(video_path, caption):
 
 # --- CHẠY MAIN PIPELINE ---
 def run_multimodal_analysis():
-    sys.path.append(os.path.join(settings.SRC_DIR, 'scraper'))
-    from database import get_videos_for_vision_analysis, update_vision_results
+    from src.scraper.database import get_videos_for_vision_analysis, update_vision_results
     
     videos = get_videos_for_vision_analysis()
     if not videos:

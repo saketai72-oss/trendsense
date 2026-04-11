@@ -11,12 +11,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 from config import settings
 
 # Import database
-sys.path.append(os.path.join(settings.SRC_DIR, 'scraper'))
-from database import init_db, get_all_analyzed_videos
+from src.scraper.database import init_db, get_all_analyzed_videos
 
 # Import model info
-sys.path.append(os.path.join(settings.SRC_DIR, 'ai_core'))
-from model_manager import get_model_info
+from src.ai_core.model_manager import get_model_info
 
 # ==========================================
 # CẤU HÌNH GIAO DIỆN
