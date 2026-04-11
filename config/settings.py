@@ -22,15 +22,6 @@ DB_FILE = os.path.join(DB_DIR, 'scraped_history.db')
 EDGE_PROFILE_DIR = os.path.join(DATA_DIR, 'edge_profile')
 DRIVER_PATH = os.path.join(SRC_DIR, 'scraper', 'msedgedriver.exe')
 
-# --- ĐƯỜNG DẪN CHO DATA/AI ---
-RAW_FILE = os.path.join(DATA_DIR, 'raw', 'tiktok_full_raw.csv')
-PROCESSED_FILE = os.path.join(DATA_DIR, 'processed', 'tiktok_analyzed.csv')
-
-try:
-    os.makedirs(os.path.dirname(RAW_FILE), exist_ok=True)
-    os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
-except Exception as e:
-    pass
 
 # --- ĐƯỜNG DẪN CHO MODEL AI ---
 MODEL_DIR = os.path.join(DATA_DIR, 'models')
@@ -49,9 +40,35 @@ SLIDING_WINDOW_DAYS = 14  # Chỉ train trên data 2 tuần gần nhất
 
 # --- CẤU HÌNH TẢI VIDEO ---
 DOWNLOAD_VIDEOS = True          # Bật/tắt tải video MP4
-DOWNLOAD_VIRAL_ONLY = True      # Chỉ tải video Viral (>50%)
+DOWNLOAD_VIRAL_ONLY = False      # Tải TẤT CẢ video, không chỉ video viral
 VIRAL_DOWNLOAD_THRESHOLD = 50   # Ngưỡng % để kích hoạt tải
-VIDEO_RETENTION_DAYS = 7        # Tự động xoá video cũ hơn N ngày
+VIDEO_RETENTION_DAYS = 14        # Tự động xoá video cũ hơn N ngày
+MAX_VIDEO_SIZE_MB = 15          # Xoá video nếu > 15MB sau khi tải
+MAX_VIDEO_DURATION = 180        # Bỏ qua video dài hơn 3 phút
+VIDEO_FORMAT = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'  # Chuẩn 480p, có fallback nếu không có
 
 # --- CẤU HÌNH PHÂN LOẠI DANH MỤC ---
 ZERO_SHOT_MODEL = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
+CATEGORY_SEPARATOR = "|"       # Dấu phân cách giữa các danh mục
+MAX_CATEGORIES = 3             # Tối đa 3 danh mục cho mỗi video
+RULE_MIN_SCORE = 1             # Score tối thiểu để gán danh mục (rule-based)
+ZERO_SHOT_THRESHOLD = 0.3     # Ngưỡng confidence cho zero-shot AI
+
+# --- CẤU HÌNH MULTIMODAL AI (Phân tích Video toàn diện) ---
+# 1. Vision (Hình ảnh tĩnh)
+VISION_CAPTION_MODEL = "Salesforce/blip-image-captioning-base"   # Model sinh mô tả frame
+VISION_CLIP_MODEL = "openai/clip-vit-base-patch32"               # Model xác minh danh mục
+VISION_KEYFRAMES = 4           # Số frame trích xuất để nhìn bối cảnh
+VISION_CATEGORY_OVERRIDE_THRESHOLD = 0.6  # Ngưỡng confidence để CLIP ghi đè danh mục
+
+# 2. Audio (Nhận diện giọng nói)
+WHISPER_MODEL = "base"         # "tiny", "base", "small", v.v.
+WHISPER_COMPUTE_TYPE = "int8"  # int8 nhanh và nhẹ cho CPU
+
+# 3. OCR (Nhận diện chữ trên màn hình)
+OCR_LANG = ['vi', 'en']        # Ngôn ngữ EasyOCR
+OCR_FRAMES = 2                 # Số frame để quét OCR (Tiết kiệm CPU)
+
+# 4. LLM (Ollama Tổng Hợp)
+OLLAMA_MODEL = "llama3:8b"     # Có thể đổi lại phi3 nếu máy yếu
+OLLAMA_URL = "http://localhost:11434/api/generate"

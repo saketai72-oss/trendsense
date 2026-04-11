@@ -1,23 +1,28 @@
 # --- Web Scraping & Trình duyệt ---
-selenium==4.18.1
-requests>=2.32.2
-undetected-chromedriver>=3.5.5
+selenium==4.41.0
+undetected-chromedriver==3.5.5
+requests==2.33.0
 
-# --- Xử lý Dữ liệu ---
-pandas==2.2.1
+# --- Xử lý Dữ liệu & Học Máy ---
+pandas==2.3.3
+scikit-learn==1.8.0
+joblib==1.5.3
 
-# --- Trí tuệ Nhân tạo (NLP + ML) ---
-underthesea
-scikit-learn
-transformers==4.38.2
-torch==2.2.1
-joblib
+# --- Download Video ---
+yt-dlp==2026.3.17
 
-# --- Tải Video ---
-yt-dlp
+# --- Trí tuệ Nhân tạo (NLP + Multimodal) ---
+transformers==5.4.0
+torch==2.11.0
+underthesea==9.2.11
+faster-whisper==1.2.1
+easyocr==1.7.2
+moviepy==2.2.1
+opencv-python==4.13.0.92
 
 # --- Web Dashboard ---
-streamlit==1.32.0
-plotly==5.15.0
+streamlit==1.55.0
+plotly==6.6.0
 
-python-dotenv==1.0.0
+# --- Utils ---
+python-dotenv==1.2.2

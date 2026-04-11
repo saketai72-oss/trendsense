@@ -62,7 +62,12 @@ def init_db():
     ''')
 
     # Auto-migrate: thêm cột mới cho database cũ
-    for col, col_type in [('category', 'TEXT'), ('video_path', 'TEXT')]:
+    for col, col_type in [
+        ('category', 'TEXT'),
+        ('video_path', 'TEXT'),
+        ('video_description', 'TEXT'),
+        ('vision_analyzed', 'INTEGER DEFAULT 0'),
+    ]:
         try:
             cursor.execute(f'ALTER TABLE videos ADD COLUMN {col} {col_type}')
         except sqlite3.OperationalError:
@@ -74,6 +79,8 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sentiment ON videos(sentiment_analyzed)')
     # Index cho truy vấn theo danh mục
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON videos(category)')
+    # Index cho truy vấn Vision AI
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_vision ON videos(vision_analyzed)')
 
     conn.commit()
     conn.close()
@@ -295,6 +302,14 @@ def update_video_path(video_id, video_path):
     conn.commit()
     conn.close()
 
+def mark_video_download_failed(video_id):
+    """Đánh dấu video lỗi tải (quá nặng, bị chặn...) để không cố tải lại"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE videos SET video_path = 'FAILED' WHERE video_id = ?", (video_id,))
+    conn.commit()
+    conn.close()
+
 
 def get_videos_without_category():
     """Lấy video chưa được gắn mác danh mục"""
@@ -324,6 +339,19 @@ def get_viral_videos_for_download(threshold=50):
     conn.close()
     return [dict(row) for row in rows]
 
+def get_all_videos_for_download():
+    """Lấy toàn bộ video chưa tải MP4, bất kể xác suất viral"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT video_id, link FROM videos
+        WHERE (video_path IS NULL OR video_path = '')
+        AND views > 0
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
 
 def get_videos_with_expired_files(days):
     """Lấy video có file MP4 cũ hơn N ngày (dựa trên scrape_date)"""
@@ -347,3 +375,74 @@ def clear_video_path(video_id):
     cursor.execute('UPDATE videos SET video_path = NULL WHERE video_id = ?', (video_id,))
     conn.commit()
     conn.close()
+
+
+# =====================================================
+# HÀM CHO VISION AI
+# =====================================================
+
+def get_videos_for_vision_analysis():
+    """Lấy video đã tải MP4 nhưng chưa phân tích Vision AI"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT video_id, video_path, category, caption FROM videos
+        WHERE video_path IS NOT NULL AND video_path != ''
+        AND (vision_analyzed IS NULL OR vision_analyzed = 0)
+        AND views > 0
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def update_vision_results(video_id, description, new_category=None):
+    """Cập nhật mô tả Vision AI và (tuỳ chọn) ghi đè danh mục"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    if new_category:
+        cursor.execute('''
+            UPDATE videos SET 
+                video_description = ?,
+                category = ?,
+                vision_analyzed = 1
+            WHERE video_id = ?
+        ''', (description, new_category, video_id))
+    else:
+        cursor.execute('''
+            UPDATE videos SET 
+                video_description = ?,
+                vision_analyzed = 1
+            WHERE video_id = ?
+        ''', (description, video_id))
+    conn.commit()
+    conn.close()
+
+
+def get_videos_with_khac_category():
+    """Lấy video vẫn còn danh mục '🌍 Khác' để xử lý đặc biệt (tải + phân loại lại)"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT video_id, link, caption, video_path, category FROM videos
+        WHERE category = '🌍 Khác'
+        AND views > 0
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def reset_all_analysis_status():
+    """Xóa tất cả cờ phân tích để AI Core có thể duyệt lại toàn bộ data"""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    print("[!] Đang reset trạng thái phân tích cho toàn bộ dữ liệu...")
+    cursor.execute('''
+        UPDATE videos SET 
+            sentiment_analyzed = 0, 
+            vision_analyzed = 0
+    ''')
+    conn.commit()
+    conn.close()
+    print("[✓] Đã reset xong. AI Core sẽ quét lại toàn bộ video.")

@@ -171,7 +171,7 @@ def load_data():
     if 'video_path' not in df.columns:
         df['has_video'] = '❌ Không'
     else:
-        df['has_video'] = df['video_path'].apply(lambda x: '✅ Có' if pd.notna(x) and x != '' else '❌ Không')
+        df['has_video'] = df['video_path'].apply(lambda x: '⚠️ Lỗi tải' if x == 'FAILED' else ('✅ Có' if pd.notna(x) and x != '' else '❌ Không'))
 
     return df
 

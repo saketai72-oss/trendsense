@@ -1,7 +1,10 @@
 """
-Categorizer — Phân loại video TikTok vào 12 danh mục.
+Categorizer — Phân loại video TikTok vào 12 danh mục (Multi-Label).
 Hybrid: Rule-based nhanh cho 80% video, Zero-shot AI cho 20% còn lại.
 Model: MoritzLaurer/mDeBERTa-v3-base-mnli-xnli (nhẹ, đa ngữ).
+
+Multi-Label: Mỗi video thuộc ít nhất 1 và tối đa MAX_CATEGORIES danh mục.
+Lưu trữ: Nối bằng CATEGORY_SEPARATOR ("|"), ví dụ: "🍳 Ẩm thực|📚 Giáo dục"
 """
 import re
 import os
@@ -112,22 +115,35 @@ def extract_hashtags(caption):
     return tags
 
 
+def _join_categories(categories_list):
+    """Nối danh sách danh mục thành chuỗi dùng separator từ settings"""
+    if not categories_list:
+        return "🌍 Khác"
+    return settings.CATEGORY_SEPARATOR.join(categories_list)
+
+
+def _split_categories(categories_str):
+    """Tách chuỗi danh mục thành list"""
+    if not categories_str or categories_str == "🌍 Khác":
+        return []
+    return [c.strip() for c in categories_str.split(settings.CATEGORY_SEPARATOR) if c.strip()]
+
+
 def categorize_by_rules(caption):
     """
-    Gắn mác nhanh bằng luật từ khoá.
+    Gắn mác nhanh bằng luật từ khoá (MULTI-LABEL).
     Phân tích cả hashtag lẫn nội dung caption.
-    Trả về danh mục hoặc None nếu không match.
+    Trả về list danh mục có score >= RULE_MIN_SCORE, tối đa MAX_CATEGORIES.
     """
     if not caption:
-        return None
+        return []
 
     # Gộp hashtag + caption thành 1 chuỗi searchable
     text_lower = caption.lower()
     hashtags = extract_hashtags(caption)
     all_tokens = set(hashtags + text_lower.split())
 
-    best_category = None
-    best_score = 0
+    scored_categories = []
 
     for category, keywords in CATEGORIES.items():
         score = sum(1 for kw in keywords if kw in all_tokens)
@@ -135,21 +151,20 @@ def categorize_by_rules(caption):
         for kw in keywords:
             if kw in text_lower and kw not in all_tokens:
                 score += 0.5
-        if score > best_score:
-            best_score = score
-            best_category = category
+        if score >= settings.RULE_MIN_SCORE:
+            scored_categories.append((category, score))
 
-    # Chỉ trả về nếu match tối thiểu 1 từ khoá
-    if best_score >= 1:
-        return best_category
-    return None
+    # Sắp xếp theo score giảm dần, lấy tối đa MAX_CATEGORIES
+    scored_categories.sort(key=lambda x: x[1], reverse=True)
+    return [cat for cat, _ in scored_categories[:settings.MAX_CATEGORIES]]
 
 
 def categorize_by_ai(captions_with_ids):
     """
-    Fallback: Dùng mDeBERTa zero-shot cho video không match rule.
+    Fallback: Dùng mDeBERTa zero-shot cho video không match rule (MULTI-LABEL).
     Input: list of (video_id, caption)
-    Output: list of (category, video_id) sẵn sàng cho batch update
+    Output: list of (category_string, video_id) sẵn sàng cho batch update
+            category_string dùng CATEGORY_SEPARATOR nối nhiều danh mục
     """
     if not captions_with_ids:
         return []
@@ -168,44 +183,60 @@ def categorize_by_ai(captions_with_ids):
         results = []
         for i, (video_id, caption) in enumerate(captions_with_ids):
             if not caption or len(str(caption).strip()) < 5:
-                results.append(("🌍 Khác", video_id))
-                continue
+                # Caption quá ngắn → vẫn cố phân loại, KHÔNG GÁN "Khác"
+                # Dùng video_id làm placeholder text
+                caption = str(caption) if caption else "video"
 
             try:
                 # Cắt caption max 200 ký tự để tăng tốc
                 text = str(caption)[:200]
-                res = classifier(text, ZERO_SHOT_LABELS, multi_label=False)
-                top_label = res['labels'][0]
-                confidence = res['scores'][0]
+                res = classifier(text, ZERO_SHOT_LABELS, multi_label=True)
 
-                if confidence >= 0.3:
-                    category = ZERO_SHOT_TO_CATEGORY.get(top_label, "🌍 Khác")
-                else:
-                    category = "🌍 Khác"
+                # Lấy tất cả label có confidence >= threshold
+                matched_labels = []
+                for label, score in zip(res['labels'], res['scores']):
+                    if score >= settings.ZERO_SHOT_THRESHOLD:
+                        category = ZERO_SHOT_TO_CATEGORY.get(label)
+                        if category:
+                            matched_labels.append(category)
+                    if len(matched_labels) >= settings.MAX_CATEGORIES:
+                        break
 
-                results.append((category, video_id))
+                # NẾU không label nào vượt ngưỡng → CƯỠNG BỨC lấy top-1
+                # TUYỆT ĐỐI KHÔNG trả về "🌍 Khác"
+                if not matched_labels:
+                    top_label = res['labels'][0]  # Label có score cao nhất
+                    top_category = ZERO_SHOT_TO_CATEGORY.get(top_label)
+                    if top_category:
+                        matched_labels.append(top_category)
+                        print(f"    [⚡] Force-classify {video_id}: {top_category} (score={res['scores'][0]:.2f})")
+
+                category_str = _join_categories(matched_labels)
+                results.append((category_str, video_id))
 
                 if (i + 1) % 10 == 0:
                     print(f"  [AI] Đã phân loại {i+1}/{len(captions_with_ids)} video...")
 
             except Exception as e:
                 print(f"  [!] Lỗi AI phân loại {video_id}: {e}")
-                results.append(("🌍 Khác", video_id))
+                # Lỗi → gán danh mục phổ biến nhất thay vì "Khác"
+                results.append(("🎭 Giải trí", video_id))
 
         return results
 
     except ImportError:
         print("[!] Thiếu thư viện transformers, bỏ qua zero-shot.")
-        return [("🌍 Khác", vid) for vid, _ in captions_with_ids]
+        return [("🎭 Giải trí", vid) for vid, _ in captions_with_ids]
     except Exception as e:
         print(f"[!] Lỗi tải model zero-shot: {e}")
-        return [("🌍 Khác", vid) for vid, _ in captions_with_ids]
+        return [("🎭 Giải trí", vid) for vid, _ in captions_with_ids]
 
 
 def categorize_video(video_id, caption):
     """
-    Phân loại 1 video bằng rule-based (gọi ngay khi cào).
+    Phân loại 1 video bằng rule-based MULTI-LABEL (gọi ngay khi cào).
     Nhanh, không cần model AI.
+    Trả về chuỗi "A|B|C" hoặc "🌍 Khác" nếu không match.
     """
-    category = categorize_by_rules(caption)
-    return category if category else "🌍 Khác"
+    categories = categorize_by_rules(caption)
+    return _join_categories(categories)

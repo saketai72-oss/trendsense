@@ -77,10 +77,11 @@ def main():
             saved_count += 1
             print(f"  [✓] Đã lưu video {video_id} vào SQLite.")
 
-            # Gắn mác danh mục ngay (rule-based, cực nhanh)
+            # Gắn mác danh mục ngay (rule-based multi-label, cực nhanh)
             category = categorize_video(video_id, stats['Caption'])
             update_category(video_id, category)
-            print(f"  [🏷️] Danh mục: {category}")
+            cat_count = len(category.split('|')) if '|' in category else 1
+            print(f"  [🏷️] Danh mục ({cat_count}): {category}")
 
     # 4. Dọn dẹp
     print("\n[*] Đang đóng trình duyệt...")

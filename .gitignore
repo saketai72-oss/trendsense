@@ -1,27 +1,29 @@
-# Data — KHÔNG push lên GitHub (trừ model)
-/data/db/
-/data/raw/
-/data/processed/
+# Data - Không push data rác, chỉ push model AI
+/data/db/*
+!/data/db/.gitkeep
+/data/videos/*
+!/data/videos/.gitkeep
 /data/edge_profile/
-/*.csv
 
-# Model AI — CÓ push lên GitHub
-!data/models/
-!data/models/rf_model.joblib
-!data/models/metrics.json
+# Model AI - CÓ push lên GitHub
+!/data/models/rf_model.joblib
+!/data/models/metrics.json
 
 # Environment
 .env
 venv/
+.venv/
+env/
+
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .pytest_cache/
 
-# IDE
+# IDE & OS
 .vscode/
 .idea/
-
-# OS
 .DS_Store
 Thumbs.db
