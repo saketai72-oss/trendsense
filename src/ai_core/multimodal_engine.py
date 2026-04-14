@@ -166,14 +166,26 @@ def run_ocr(cv2_frames):
 
 
 def summarize_with_ollama(audio_text, ocr_text, blip_text, original_caption=""):
+    from src.ai_core.categorizer import STANDARD_CATEGORIES
+    import re
+    
+    categories_str = ", ".join(STANDARD_CATEGORIES)
+    
     prompt = f"""Bạn là một trợ lý AI thông minh phân tích video TikTok.
 Dưới đây là các dữ liệu tôi trích xuất được từ một video:
-1. Âm thanh nghe được (Transcript): {audio_text}
-2. Chữ hiện trên màn hình (OCR): {ocr_text}
-3. Bối cảnh không gian do AI nhìn thấy (Vision): {blip_text}
-4. Tiêu đề gốc của người dùng mô tả video: {original_caption}
+1. Âm thanh (Transcript): {audio_text}
+2. Chữ trên màn hình (OCR): {ocr_text}
+3. Bối cảnh hình ảnh (Vision): {blip_text}
+4. Tiêu đề gốc: {original_caption}
 
-Nhiệm vụ: Hãy tổng hợp lại và viết ra đúng 1 câu văn, bằng tiếng Việt, giải thích khách quan và dễ hiểu nhất nội dung của video này là gì. Đừng giải thích thêm, chỉ xuất ra một câu tóm tắt."""
+NHIỆM VỤ:
+1. Hãy viết 1 câu tóm tắt nội dung video (~20 từ), ngắn gọn, khách quan, tiếng Việt.
+2. Từ nội dung đó, hãy chọn ra 1 danh mục phù hợp nhất từ danh sách sau: [{categories_str}].
+
+BẮT BUỘC TRẢ VỀ ĐỊNH DẠNG JSON SAU:
+{{"summary": "...", "category": "..."}}
+
+Chỉ xuất ra JSON, không giải thích thêm."""
 
     try:
         response = requests.post(
@@ -181,37 +193,81 @@ Nhiệm vụ: Hãy tổng hợp lại và viết ra đúng 1 câu văn, bằng t
             json={
                 "model": settings.OLLAMA_MODEL,
                 "prompt": prompt,
-                "stream": False
+                "stream": False,
+                "format": "json" # Ép Ollama 3+ trả về JSON
             },
             timeout=120
         )
         if response.status_code == 200:
-            return response.json().get('response', '').strip()
+            res_json = response.json()
+            # Lấy data thô từ 'response' của Ollama
+            raw_content = res_json.get('response', '').strip()
+            
+            # JSON Guard: Thử parse trực tiếp hoặc dùng regex nếu AI nói leo
+            try:
+                data = json.loads(raw_content)
+                summary = data.get('summary', '').strip()
+                category = data.get('category', '🌍 Khác').strip()
+                
+                # Robust category matching (xử lý trường hợp có/không có emoji)
+                matched_category = "🌍 Khác"
+                for std_cat in STANDARD_CATEGORIES:
+                    if std_cat.lower() == category.lower():
+                        matched_category = std_cat
+                        break
+                    # Bỏ emoji ở đầu (vd: '🎭 Giải trí' -> 'Giải trí')
+                    if " " in std_cat:
+                        std_name = std_cat.split(" ", 1)[-1].lower()
+                        if std_name in category.lower():
+                            matched_category = std_cat
+                            break
+                            
+                return summary, matched_category
+            except:
+                # Fallback: Nếu JSON hỏng, cố gắng lấy summary từ raw_content
+                print(f"    [!] Lỗi parse JSON Ollama, dùng fallback raw content.")
+                return raw_content[:150], "🌍 Khác"
         else:
             print(f"    [!] Lỗi Ollama (HTTP {response.status_code}): {response.text[:100]}")
     except requests.exceptions.RequestException as e:
         print(f"    [!] Lỗi Timeout/Kết nối Ollama: {str(e)[:80]}")
         
-    return "Lỗi tổng hợp. Âm thanh nói: " + audio_text[:80] + "..."
+    return "Lỗi tổng hợp dữ liệu.", "🌍 Khác"
 
 
 def analyze_multimodal(video_path, caption):
+    global _whisper_model, _ocr_reader, _caption_processor, _caption_model
+    import gc
+
     # 1. Trích xuất Frames
+    print("      [1/4] Đang trích xuất frames...")
     pil_frames, cv2_frames = extract_frames(video_path, settings.VISION_KEYFRAMES, settings.OCR_FRAMES)
     
     # 2. Nghe (Whisper)
+    print("      [2/4] Đang chạy Whisper (Audio)...")
     audio_t = extract_audio_and_transcribe(video_path)
     
     # 3. OCR (EasyOCR)
+    print("      [3/4] Đang chạy EasyOCR (Text)...")
     ocr_t = run_ocr(cv2_frames)
     
     # 4. Nhìn (BLIP)
+    print("      [4/4] Đang chạy BLIP (Vision)...")
     blip_t = run_blip(pil_frames)
     
-    # 5. Nghĩ (Ollama)
-    final_summary = summarize_with_ollama(audio_t, ocr_t, blip_t, caption)
+    # --- QUAN TRỌNG: Dọn dẹp RAM trước khi gọi Ollama ---
+    print("      🧹 Đang dọn dẹp RAM (Whisper/OCR/BLIP)...")
+    _whisper_model = None
+    _ocr_reader = None
+    _caption_processor = None
+    _caption_model = None
+    gc.collect()
     
-    return final_summary, audio_t, ocr_t, blip_t
+    # 5. Nghĩ (Ollama)
+    print("      🧠 Đang gửi cho Ollama phân tích tổng hợp & phân loại...")
+    final_summary, final_category = summarize_with_ollama(audio_t, ocr_t, blip_t, caption)
+    
+    return final_summary, final_category, audio_t, ocr_t, blip_t
 
 
 # --- CHẠY MAIN PIPELINE ---
@@ -240,11 +296,12 @@ def run_multimodal_analysis():
             continue
             
         try:
-            summary, a_txt, o_txt, b_txt = analyze_multimodal(path, caption)
+            summary, cat, a_txt, o_txt, b_txt = analyze_multimodal(path, caption)
             print(f"    🎧 Audio: {a_txt[:60]}...")
             print(f"    📝 OCR:   {o_txt[:60]}...")
             print(f"    👁️ Vision:{b_txt[:60]}...")
             print(f"    ✨ Tóm tắt Ollama: {summary}")
+            print(f"    🏷️ Phân loại Ollama: {cat}")
             
             update_vision_results(vid, summary)
             success += 1

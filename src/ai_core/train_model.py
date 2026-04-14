@@ -17,18 +17,17 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 from config import settings
 
 # Import database từ scraper
-sys.path.append(os.path.join(settings.SRC_DIR, 'scraper'))
-from database import init_db, get_recent_videos
+from src.scraper.database import init_db, get_recent_videos
 
 # Import model manager
-from model_manager import save_model, get_model_info
+from src.ai_core.model_manager import save_model, get_model_info
 
 FEATURES = ['Like_Rate', 'Comment_Rate', 'Share_Rate', 'Save_Rate', 'Positive_Score', 'Views_Per_Hour']
 
 
 def train():
     print("\n" + "=" * 60)
-    print("🧠 KHỞI ĐỘNG LUỒNG TRAIN — WEEKLY RETRAIN")
+    print("[*] KHOI DONG LUONG TRAIN - WEEKLY RETRAIN")
     print(f"   Sliding Window: {settings.SLIDING_WINDOW_DAYS} ngày gần nhất")
     print("=" * 60)
 
@@ -37,7 +36,7 @@ def train():
     rows = get_recent_videos(days=settings.SLIDING_WINDOW_DAYS)
 
     if not rows:
-        print("[!] ❌ Không có dữ liệu nào trong cửa sổ thời gian. Huỷ training.")
+        print("[!] Không có dữ liệu nào trong cửa sổ thời gian. Huỷ training.")
         return
 
     df = pd.DataFrame(rows)
@@ -69,7 +68,7 @@ def train():
     df['Is_Future_Trend'] = (vv >= threshold).astype(int)
 
     if len(df['Is_Future_Trend'].unique()) < 2:
-        print("[!] ⚠️ Dữ liệu chưa đủ độ phân hoá. Không thể train.")
+        print("[!] Dữ liệu chưa đủ độ phân hoá. Không thể train.")
         print("    → Cần thêm data để có cả video trend và video bình thường.")
         return
 
@@ -96,7 +95,7 @@ def train():
         metrics["accuracy"] = round(acc, 4)
 
         if len(y_test.unique()) == 2:
-            print("\n📊 BÁO CÁO ĐỘ CHÍNH XÁC (TESTING):")
+            print("\n[*] BAO CAO DO CHINH XAC (TESTING):")
             print(classification_report(
                 y_test, y_pred,
                 target_names=['Bình thường', 'SẼ THÀNH TREND'],
@@ -105,7 +104,7 @@ def train():
         print(f"[*] Accuracy: {acc:.2%}")
 
     except ValueError as e:
-        print(f"[!] ⚠️ Không đủ data để split test ({e}). Train trên toàn bộ.")
+        print(f"[!] Khong du data de split test ({e}). Train tren toan bo.")
         rf_model = RandomForestClassifier(
             n_estimators=100, random_state=42, class_weight='balanced'
         )
@@ -120,19 +119,19 @@ def train():
         old_acc = old_info['accuracy']
         new_acc = metrics.get('accuracy', 0)
         if isinstance(new_acc, float) and new_acc < old_acc * 0.8:
-            print(f"\n[!] ⚠️ CẢNH BÁO: Model mới ({new_acc:.2%}) tệ hơn model cũ ({old_acc:.2%}) > 20%!")
+            print(f"\n[!] CANH BAO: Model mới ({new_acc:.2%}) tệ hơn model cũ ({old_acc:.2%}) > 20%!")
             print("    → Vẫn lưu model mới nhưng cần theo dõi.")
 
     save_model(rf_model, metrics)
 
     # 7. Feature importance
-    print("\n🔍 ĐỘ QUAN TRỌNG CỦA CÁC FEATURES:")
+    print("\n[*] DO QUAN TRONG CUA CAC FEATURES:")
     for feat, imp in sorted(zip(FEATURES, rf_model.feature_importances_), key=lambda x: -x[1]):
         bar = "█" * int(imp * 40)
         print(f"   {feat:20s} {imp:.3f} {bar}")
 
     print(f"\n{'=' * 60}")
-    print("✅ TRAINING HOÀN TẤT! Model đã sẵn sàng cho luồng Inference.")
+    print("[V] TRAINING HOAN TAT! Model da san sang cho luong Inference.")
     print(f"{'=' * 60}")
 
 

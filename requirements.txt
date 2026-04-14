@@ -26,3 +26,4 @@ plotly==6.6.0
 
 # --- Utils ---
 python-dotenv==1.2.2
+langdetect==1.0.9

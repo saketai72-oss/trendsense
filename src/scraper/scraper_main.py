@@ -1,18 +1,24 @@
 import sys
 import os
+
+# Thêm đường dẫn gốc trước khi import local modules
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 import time
 from datetime import datetime
 
+try:
+    from langdetect import detect, LangDetectException
+except ImportError:
+    print("[!] Thiếu thư viện langdetect. Hãy chạy: pip install langdetect")
+    sys.exit(1)
+
+from config import settings
 from src.scraper.browser import init_driver
-from src.scraper.database import init_db, extract_video_id, mark_as_scraped, save_video, update_category
+from src.scraper.database import init_db, extract_video_id, mark_as_scraped, insert_video_metadata
 from src.scraper.link_crawler import get_trending_links
 from src.scraper.content_parser import extract_basic_stats, extract_top_comments
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from config import settings
-
-# Import categorizer
-from src.ai_core.categorizer import categorize_video
 
 
 def main():
@@ -26,7 +32,7 @@ def main():
     # 1. Tìm danh sách link
     links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
 
-    print("\n===== BẮT ĐẦU CÀO DỮ LIỆU =====\n")
+    print("\n===== BẮT ĐẦU THU THẬP DỮ LIỆU =====\n")
     today = datetime.now().date().isoformat()
     saved_count = 0
 
@@ -39,17 +45,35 @@ def main():
         # Bóc tách các chỉ số cơ bản
         stats = extract_basic_stats(driver.page_source)
 
+        # Chốt chặn ngôn ngữ: Chỉ lấy video Tiếng Việt
+        caption_text = stats.get('Caption', '').strip()
+        if caption_text:
+            try:
+                # Kiểm tra ngôn ngữ của caption
+                lang = detect(caption_text)
+                if lang != 'vi':
+                    print(f"  [✂️] Bỏ qua video quốc tế (Ngôn ngữ: {lang}).")
+                    
+                    # Vẫn đánh dấu là đã cào để không bị lặp lại lần sau
+                    video_id = extract_video_id(link)
+                    if video_id:
+                        mark_as_scraped(video_id)
+                    continue
+            except LangDetectException:
+                # Nếu caption chỉ toàn emoji hoặc số (không detect được)
+                pass
+
         # Bóc tách Top 5 bình luận
         has_comments = stats['Comments'] > 0
         top_5_comments = extract_top_comments(driver, has_comments)
 
-        # 3. Đóng gói dữ liệu và ghi vào SQLite
+        # 3. Đóng gói dữ liệu và ghi vào Postgres
         video_id = extract_video_id(link)
         if video_id:
             mark_as_scraped(video_id)
             print(f"  [*] Đã cất ID {video_id} vào kho chống trùng.")
 
-            # Chuẩn bị data cho SQLite
+            # Chuẩn bị data cho database
             video_data = {
                 'link': link,
                 'create_time': stats['Create_Time'],
@@ -71,16 +95,11 @@ def main():
                     video_data[f'top{idx+1}_cmt'] = ""
                     video_data[f'top{idx+1}_likes'] = 0
 
-            # Ghi vào SQLite
-            save_video(video_id, video_data)
+            # Ghi vào PostgreSQL
+            insert_video_metadata(video_id, video_data)
             saved_count += 1
-            print(f"  [✓] Đã lưu video {video_id} vào SQLite.")
+            print(f"  [✓] Đã lưu metadata video {video_id} vào DB.")
 
-            # Gắn mác danh mục ngay (rule-based multi-label, cực nhanh)
-            category = categorize_video(video_id, stats['Caption'])
-            update_category(video_id, category)
-            cat_count = len(category.split('|')) if '|' in category else 1
-            print(f"  [🏷️] Danh mục ({cat_count}): {category}")
 
     # 4. Dọn dẹp
     print("\n[*] Đang đóng trình duyệt...")

@@ -125,11 +125,11 @@ st.markdown(f"""
 
 
 # ==========================================
-# TẢI DỮ LIỆU TỪ SQLITE
+# TẢI DỮ LIỆU TỪ SUPABASE (CLOUD)
 # ==========================================
 @st.cache_data(ttl=300)
 def load_data():
-    init_db()
+    # init_db() # Đã khởi tạo ở main DB layer hoặc migration
     rows = get_all_analyzed_videos()
     if not rows:
         return None
@@ -166,10 +166,6 @@ def load_data():
     else:
         df['category'] = df['category'].fillna('Chưa phân loại')
         
-    if 'video_path' not in df.columns:
-        df['has_video'] = '❌ Không'
-    else:
-        df['has_video'] = df['video_path'].apply(lambda x: '⚠️ Lỗi tải' if x == 'FAILED' else ('✅ Có' if pd.notna(x) and x != '' else '❌ Không'))
 
     return df
 
@@ -658,7 +654,7 @@ for _, video in top_for_comments.iterrows():
             )
             st.markdown(f"🏷️ **Từ khoá:** {kw_tags}", unsafe_allow_html=True)
             
-        st.markdown(f"**Danh mục:** {video.get('category', 'Chưa phân loại')} | **Trạng thái MP4:** {video.get('has_video', '❌ Không')}")
+        st.markdown(f"**Danh mục:** {video.get('category', 'Chưa phân loại')}")
 
 
 # ==========================================
@@ -734,7 +730,7 @@ display_cols = [
     'link', 'Display_Name', 'category', 'viral_probability', 'video_sentiment',
     'views', 'likes', 'comments', 'shares', 'saves',
     'views_per_hour', 'engagement_rate', 'viral_velocity', 'positive_score',
-    'top_keywords', 'has_video', 'scrape_date'
+    'top_keywords', 'scrape_date'
 ]
 valid_cols = [col for col in display_cols if col in df_filtered.columns]
 
@@ -750,7 +746,6 @@ st.dataframe(
         "link": st.column_config.LinkColumn("🔗 Link"),
         "Display_Name": "📹 Video",
         "category": "🏷️ Danh Mục",
-        "has_video": "🎬 Đã Tải MP4",
         "video_sentiment": "💭 Cảm Xúc",
         "views": st.column_config.NumberColumn("👁️ Views", format="%d"),
         "likes": st.column_config.NumberColumn("❤️ Likes", format="%d"),
@@ -776,7 +771,7 @@ st.divider()
 st.markdown(
     '<p style="text-align:center; color:#4a5568; font-size:0.8rem;">'
     '🎯 TrendSense Radar — AI-Powered Viral Prediction System<br>'
-    'Pipeline: Selenium Scraper → SQLite → BERT NLP → RandomForest → Streamlit'
+    'Pipeline: Selenium Scraper (GitHub Actions) → Supabase (Cloud) → AI Worker (Local) → Streamlit'
     '</p>',
     unsafe_allow_html=True
 )

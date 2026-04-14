@@ -5,7 +5,12 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Đánh thức file .env dậy
-load_dotenv(os.path.join(BASE_DIR, '.env'))
+load_dotenv(os.path.join(BASE_DIR, '.env'), override=True)
+
+# --- DATABASE CONFIG (SUPABASE) ---
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("FATAL: DATABASE_URL not found in .env! TremdSense requires a PostgreSQL database to run.")
 
 # Định nghĩa các thư mục cốt lõi
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -15,10 +20,6 @@ SRC_DIR = os.path.join(BASE_DIR, 'src')
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
 # --- ĐƯỜNG DẪN CHO SCRAPER ---
-DB_DIR = os.path.join(DATA_DIR, 'db')
-os.makedirs(DB_DIR, exist_ok=True)
-
-DB_FILE = os.path.join(DB_DIR, 'scraped_history.db')
 EDGE_PROFILE_DIR = os.path.join(DATA_DIR, 'edge_profile')
 DRIVER_PATH = os.path.join(SRC_DIR, 'scraper', 'msedgedriver.exe')
 
@@ -35,7 +36,7 @@ VIDEOS_DIR = os.path.join(DATA_DIR, 'videos')
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
 # === BIẾN TOÀN CỤC ĐIỀU KHIỂN ===
-MAX_VIDEOS = 30
+MAX_VIDEOS = 3
 SLIDING_WINDOW_DAYS = 14  # Chỉ train trên data 2 tuần gần nhất
 
 # --- CẤU HÌNH TẢI VIDEO ---

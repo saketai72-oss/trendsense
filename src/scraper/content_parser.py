@@ -3,8 +3,8 @@ import time
 import random
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
-from utils import parse_like_count
-from captcha import solve_rotate_captcha
+from src.scraper.utils import parse_like_count
+from src.scraper.captcha import solve_rotate_captcha
 
 def get_real_stat(pattern, text):
     matches = re.findall(pattern, text)

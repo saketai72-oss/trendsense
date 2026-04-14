@@ -4,8 +4,7 @@ import os
 
 def run_script(script_path, is_streamlit=False):
     """Hàm chạy các file Python và bắt lỗi nếu có"""
-    print(f"\n{'='*60}")
-    print(f"🚀 ĐANG CHẠY: {script_path}")
+    print(f"[*] DANG CHAY: {script_path}")
     print(f"{'='*60}\n")
 
     try:
@@ -19,7 +18,7 @@ def run_script(script_path, is_streamlit=False):
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("🌟 BẮT ĐẦU KHỞI ĐỘNG HỆ THỐNG TỰ ĐỘNG TRENDSENSE 🌟")
+    print("--- BAT DAU KHOI DONG HE THONG TU DONG TRENDSENSE ---")
 
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -40,5 +39,5 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     # BƯỚC 3: MỞ TRANG TỔNG QUAN (DASHBOARD)
     # ---------------------------------------------------------
-    print("\n🎉 DỮ LIỆU ĐÃ CẬP NHẬT HOÀN TẤT! ĐANG MỞ DASHBOARD...\n")
+    print("\n[V] DU LIEU DA CAP NHAT HOAN TAT! DANG MO DASHBOARD...\n")
     run_script(app_script, is_streamlit=True)

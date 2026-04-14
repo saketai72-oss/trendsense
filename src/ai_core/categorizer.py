@@ -75,6 +75,9 @@ CATEGORIES = {
     ],
 }
 
+# Danh sách danh mục chuẩn để export (dùng cho Ollama)
+STANDARD_CATEGORIES = list(CATEGORIES.keys())
+
 # Label cho zero-shot (tiếng Anh để model hiểu tốt hơn)
 ZERO_SHOT_LABELS = [
     "entertainment and comedy",

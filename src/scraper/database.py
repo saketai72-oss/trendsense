@@ -1,448 +1,214 @@
-import os
-import sqlite3
-import sys
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
-
-# Khai báo đường dẫn gốc để import được config
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import settings
 
-DB_FILE = settings.DB_FILE
-
-
-def _get_conn():
-    """Tạo connection với WAL mode cho tốc độ ghi cao"""
-    conn = sqlite3.connect(DB_FILE)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.row_factory = sqlite3.Row
+def get_connection():
+    """Tạo kết nối trực tiếp tới Supabase PostgreSQL"""
+    conn = psycopg2.connect(settings.DATABASE_URL)
+    conn.autocommit = False
     return conn
 
-
 def init_db():
-    """Khởi tạo database và tạo bảng nếu chưa có"""
-    conn = _get_conn()
-    cursor = conn.cursor()
+    """Khởi tạo database PostgreSQL trên Supabase"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Bảng lưu lịch sử video
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS history (
+                    video_id TEXT PRIMARY KEY
+                )
+            ''')
 
-    # Bảng chống trùng (giữ nguyên)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS history (
-            video_id TEXT PRIMARY KEY
-        )
-    ''')
+            # Bảng lưu trữ toàn bộ dữ liệu video
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS videos (
+                    video_id TEXT PRIMARY KEY,
+                    link TEXT,
+                    caption TEXT,
+                    views INTEGER DEFAULT 0,
+                    likes INTEGER DEFAULT 0,
+                    comments INTEGER DEFAULT 0,
+                    shares INTEGER DEFAULT 0,
+                    saves INTEGER DEFAULT 0,
+                    create_time BIGINT DEFAULT 0,
+                    scrape_date DATE DEFAULT CURRENT_DATE,
 
-    # Bảng lưu trữ toàn bộ dữ liệu video
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS videos (
-            video_id TEXT PRIMARY KEY,
-            link TEXT,
-            caption TEXT,
-            views INTEGER DEFAULT 0,
-            likes INTEGER DEFAULT 0,
-            comments INTEGER DEFAULT 0,
-            shares INTEGER DEFAULT 0,
-            saves INTEGER DEFAULT 0,
-            create_time INTEGER DEFAULT 0,
-            scrape_date TEXT,
-            top1_cmt TEXT, top1_likes INTEGER DEFAULT 0,
-            top2_cmt TEXT, top2_likes INTEGER DEFAULT 0,
-            top3_cmt TEXT, top3_likes INTEGER DEFAULT 0,
-            top4_cmt TEXT, top4_likes INTEGER DEFAULT 0,
-            top5_cmt TEXT, top5_likes INTEGER DEFAULT 0,
-            views_per_hour REAL,
-            engagement_rate REAL,
-            viral_velocity REAL,
-            positive_score REAL,
-            video_sentiment TEXT,
-            top_keywords TEXT,
-            viral_probability REAL,
-            sentiment_analyzed INTEGER DEFAULT 0,
-            category TEXT,
-            video_path TEXT
-        )
-    ''')
+                    -- Top Comments
+                    top1_cmt TEXT, top1_likes INTEGER DEFAULT 0,
+                    top2_cmt TEXT, top2_likes INTEGER DEFAULT 0,
+                    top3_cmt TEXT, top3_likes INTEGER DEFAULT 0,
+                    top4_cmt TEXT, top4_likes INTEGER DEFAULT 0,
+                    top5_cmt TEXT, top5_likes INTEGER DEFAULT 0,
 
-    # Auto-migrate: thêm cột mới cho database cũ
-    for col, col_type in [
-        ('category', 'TEXT'),
-        ('video_path', 'TEXT'),
-        ('video_description', 'TEXT'),
-        ('vision_analyzed', 'INTEGER DEFAULT 0'),
-    ]:
-        try:
-            cursor.execute(f'ALTER TABLE videos ADD COLUMN {col} {col_type}')
-        except sqlite3.OperationalError:
-            pass  # Cột đã tồn tại
+                    -- AI Analysis Fields
+                    views_per_hour REAL DEFAULT 0,
+                    engagement_rate REAL DEFAULT 0,
+                    viral_velocity REAL DEFAULT 0,
+                    positive_score REAL DEFAULT 0,
+                    video_sentiment TEXT,
+                    top_keywords TEXT,
+                    viral_probability REAL DEFAULT 0,
+                    category TEXT,
+                    video_description TEXT,
 
-    # Index cho truy vấn theo ngày (sliding window)
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)')
-    # Index cho truy vấn NLP cache
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sentiment ON videos(sentiment_analyzed)')
-    # Index cho truy vấn theo danh mục
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON videos(category)')
-    # Index cho truy vấn Vision AI
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_vision ON videos(vision_analyzed)')
+                    -- Status Flags
+                    ai_status VARCHAR(20) DEFAULT 'pending'
+                )
+            ''')
 
-    conn.commit()
-    conn.close()
+            # Index tối ưu hóa
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ai_status ON videos(ai_status)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON videos(category)')
 
+            conn.commit()
+            print("[OK] Supabase Schema initialized successfully.")
+    except Exception as e:
+        print(f"[ERROR] Failed to init schema: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
-# =====================================================
-# CÁC HÀM CŨ (GIỮ NGUYÊN CHO SCRAPER)
-# =====================================================
+def insert_video_metadata(video_id, data_dict):
+    """Ghi dữ liệu thô từ TikTok (UPSERT nếu trùng ID)"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            query = '''
+                INSERT INTO videos (
+                    video_id, link, caption, views, likes, comments, shares, saves,
+                    create_time, scrape_date, ai_status,
+                    top1_cmt, top1_likes, top2_cmt, top2_likes,
+                    top3_cmt, top3_likes, top4_cmt, top4_likes,
+                    top5_cmt, top5_likes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (video_id) DO UPDATE SET
+                    views = EXCLUDED.views,
+                    likes = EXCLUDED.likes,
+                    comments = EXCLUDED.comments,
+                    shares = EXCLUDED.shares,
+                    saves = EXCLUDED.saves,
+                    caption = EXCLUDED.caption
+            '''
+            cursor.execute(query, (
+                video_id,
+                data_dict.get('link', ''),
+                data_dict.get('caption', ''),
+                data_dict.get('views', 0),
+                data_dict.get('likes', 0),
+                data_dict.get('comments', 0),
+                data_dict.get('shares', 0),
+                data_dict.get('saves', 0),
+                data_dict.get('create_time', 0),
+                data_dict.get('scrape_date', datetime.now().date().isoformat()),
+                data_dict.get('top1_cmt', ''), data_dict.get('top1_likes', 0),
+                data_dict.get('top2_cmt', ''), data_dict.get('top2_likes', 0),
+                data_dict.get('top3_cmt', ''), data_dict.get('top3_likes', 0),
+                data_dict.get('top4_cmt', ''), data_dict.get('top4_likes', 0),
+                data_dict.get('top5_cmt', ''), data_dict.get('top5_likes', 0)
+            ))
+
+            cursor.execute('INSERT INTO history (video_id) VALUES (%s) ON CONFLICT DO NOTHING', (video_id,))
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] insert_video_metadata failed: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 def is_scraped(video_id):
-    """Kiểm tra xem video đã bị cào chưa"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('SELECT 1 FROM history WHERE video_id = ?', (video_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result is not None
-
+    """Kiểm tra video đã tồn tại trong history"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('SELECT 1 FROM history WHERE video_id = %s', (video_id,))
+            return cursor.fetchone() is not None
+    finally:
+        conn.close()
 
 def mark_as_scraped(video_id):
-    """Lưu ID video vào bảng history sau khi cào xong"""
-    conn = _get_conn()
-    cursor = conn.cursor()
+    """Lưu ID video vào history"""
+    conn = get_connection()
     try:
-        cursor.execute('INSERT INTO history (video_id) VALUES (?)', (video_id,))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        pass
-    conn.close()
+        with conn.cursor() as cursor:
+            cursor.execute('INSERT INTO history (video_id) VALUES (%s) ON CONFLICT DO NOTHING', (video_id,))
+            conn.commit()
+    finally:
+        conn.close()
 
-
-def extract_video_id(url):
-    """Cắt lấy đúng cái dãy số ID từ link TikTok"""
+def get_pending_videos():
+    """Lấy danh sách video chờ xử lý AI"""
+    conn = get_connection()
     try:
-        return url.split('/video/')[1].split('?')[0]
-    except:
-        return None
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM videos WHERE ai_status = 'pending' AND views > 0 ORDER BY scrape_date DESC")
+            return cursor.fetchall()
+    finally:
+        conn.close()
 
+def update_ai_results(video_id, res):
+    """Cập nhật kết quả AI tổng hợp"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            query = '''
+                UPDATE videos SET
+                    category = %s, video_description = %s, top_keywords = %s,
+                    video_sentiment = %s, positive_score = %s, views_per_hour = %s,
+                    engagement_rate = %s, viral_velocity = %s, viral_probability = %s,
+                    ai_status = 'completed'
+                WHERE video_id = %s
+            '''
+            cursor.execute(query, (
+                res.get('category'), res.get('video_description'), res.get('top_keywords'),
+                res.get('video_sentiment'), res.get('positive_score', 0), res.get('views_per_hour', 0),
+                res.get('engagement_rate', 0), res.get('viral_velocity', 0), res.get('viral_probability', 0),
+                video_id
+            ))
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] update_ai_results failed: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
-# =====================================================
-# CÁC HÀM MỚI CHO PIPELINE TÁCH TRAIN/INFERENCE
-# =====================================================
-
-def save_video(video_id, data_dict):
-    """Ghi 1 video vào bảng videos (INSERT OR REPLACE)"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-
-    # Đảm bảo có scrape_date
-    if 'scrape_date' not in data_dict or not data_dict['scrape_date']:
-        data_dict['scrape_date'] = datetime.now().date().isoformat()
-
-    cursor.execute('''
-        INSERT OR REPLACE INTO videos (
-            video_id, link, caption, views, likes, comments, shares, saves,
-            create_time, scrape_date,
-            top1_cmt, top1_likes, top2_cmt, top2_likes,
-            top3_cmt, top3_likes, top4_cmt, top4_likes,
-            top5_cmt, top5_likes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        video_id,
-        data_dict.get('link', ''),
-        data_dict.get('caption', ''),
-        data_dict.get('views', 0),
-        data_dict.get('likes', 0),
-        data_dict.get('comments', 0),
-        data_dict.get('shares', 0),
-        data_dict.get('saves', 0),
-        data_dict.get('create_time', 0),
-        data_dict['scrape_date'],
-        data_dict.get('top1_cmt', ''),
-        data_dict.get('top1_likes', 0),
-        data_dict.get('top2_cmt', ''),
-        data_dict.get('top2_likes', 0),
-        data_dict.get('top3_cmt', ''),
-        data_dict.get('top3_likes', 0),
-        data_dict.get('top4_cmt', ''),
-        data_dict.get('top4_likes', 0),
-        data_dict.get('top5_cmt', ''),
-        data_dict.get('top5_likes', 0),
-    ))
-    conn.commit()
-    conn.close()
-
-
-def save_videos_batch(video_list):
-    """Ghi nhiều video vào bảng videos cùng lúc"""
-    for video_id, data_dict in video_list:
-        save_video(video_id, data_dict)
-    print(f"[+] Đã ghi {len(video_list)} video vào SQLite.")
-
-
-def get_unanalyzed_videos():
-    """Lấy danh sách video chưa chạy NLP sentiment"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT * FROM videos 
-        WHERE sentiment_analyzed = 0 AND views > 0
-        ORDER BY scrape_date DESC
-    ''')
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-def update_sentiment(video_id, sentiment_data):
-    """Cập nhật kết quả NLP + đánh cờ đã phân tích"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE videos SET
-            views_per_hour = ?,
-            engagement_rate = ?,
-            viral_velocity = ?,
-            positive_score = ?,
-            video_sentiment = ?,
-            top_keywords = ?,
-            sentiment_analyzed = 1
-        WHERE video_id = ?
-    ''', (
-        sentiment_data.get('views_per_hour', 0),
-        sentiment_data.get('engagement_rate', 0),
-        sentiment_data.get('viral_velocity', 0),
-        sentiment_data.get('positive_score', 0),
-        sentiment_data.get('video_sentiment', ''),
-        sentiment_data.get('top_keywords', ''),
-        video_id,
-    ))
-    conn.commit()
-    conn.close()
-
-
-def update_prediction(video_id, viral_probability):
-    """Cập nhật kết quả dự đoán viral cho 1 video"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE videos SET viral_probability = ? WHERE video_id = ?
-    ''', (viral_probability, video_id))
-    conn.commit()
-    conn.close()
-
-
-def update_predictions_batch(predictions):
-    """Cập nhật kết quả dự đoán cho nhiều video cùng lúc
-    predictions: list of (video_id, viral_probability)
-    """
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.executemany('''
-        UPDATE videos SET viral_probability = ? WHERE video_id = ?
-    ''', predictions)
-    conn.commit()
-    conn.close()
-    print(f"[+] Đã cập nhật xác suất viral cho {len(predictions)} video.")
-
-
-def get_recent_videos(days=None):
-    """Lấy video trong N ngày gần nhất (sliding window cho training)"""
-    if days is None:
-        days = settings.SLIDING_WINDOW_DAYS
-
-    cutoff_date = (datetime.now() - timedelta(days=days)).date().isoformat()
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT * FROM videos 
-        WHERE scrape_date >= ? AND sentiment_analyzed = 1 AND views > 0
-        ORDER BY scrape_date DESC
-    ''', (cutoff_date,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
+def get_recent_videos(days=14):
+    """Lấy video cho training (Sliding Window)"""
+    cutoff = (datetime.now() - timedelta(days=days or 14)).date().isoformat()
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute('SELECT * FROM videos WHERE scrape_date >= %s AND ai_status = "completed" AND views > 0', (cutoff,))
+            return cursor.fetchall()
+    finally:
+        conn.close()
 
 def get_all_analyzed_videos():
-    """Lấy toàn bộ video đã xử lý xong cho Dashboard"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT * FROM videos 
-        WHERE sentiment_analyzed = 1 AND views > 0
-        ORDER BY viral_probability DESC NULLS LAST
-    ''')
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-# =====================================================
-# HÀM MỚI CHO CATEGORY & VIDEO DOWNLOAD
-# =====================================================
-
-def update_category(video_id, category):
-    """Ghi danh mục cho 1 video"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('UPDATE videos SET category = ? WHERE video_id = ?', (category, video_id))
-    conn.commit()
-    conn.close()
-
-
-def update_categories_batch(category_list):
-    """Ghi danh mục cho nhiều video: [(category, video_id), ...]"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.executemany('UPDATE videos SET category = ? WHERE video_id = ?', category_list)
-    conn.commit()
-    conn.close()
-
-
-def update_video_path(video_id, video_path):
-    """Ghi đường dẫn file MP4 đã tải cho 1 video"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('UPDATE videos SET video_path = ? WHERE video_id = ?', (video_path, video_id))
-    conn.commit()
-    conn.close()
-
-def mark_video_download_failed(video_id):
-    """Đánh dấu video lỗi tải (quá nặng, bị chặn...) để không cố tải lại"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE videos SET video_path = 'FAILED' WHERE video_id = ?", (video_id,))
-    conn.commit()
-    conn.close()
-
-
-def get_videos_without_category():
-    """Lấy video chưa được gắn mác danh mục"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT video_id, link, caption FROM videos
-        WHERE (category IS NULL OR category = '' OR category = '🌍 Khác')
-        AND sentiment_analyzed = 1 AND views > 0
-    ''')
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-def get_viral_videos_for_download(threshold=50):
-    """Lấy video viral chưa tải MP4"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT video_id, link FROM videos
-        WHERE viral_probability >= ?
-        AND (video_path IS NULL OR video_path = '')
-        AND views > 0
-    ''', (threshold,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-def get_all_videos_for_download():
-    """Lấy toàn bộ video chưa tải MP4, bất kể xác suất viral"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT video_id, link FROM videos
-        WHERE (video_path IS NULL OR video_path = '')
-        AND views > 0
-    ''')
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-def get_videos_with_expired_files(days):
-    """Lấy video có file MP4 cũ hơn N ngày (dựa trên scrape_date)"""
-    cutoff_date = (datetime.now() - timedelta(days=days)).date().isoformat()
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT video_id, video_path FROM videos
-        WHERE video_path IS NOT NULL AND video_path != ''
-        AND scrape_date < ?
-    ''', (cutoff_date,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-def clear_video_path(video_id):
-    """Xoá đường dẫn video (sau khi xoá file thật)"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('UPDATE videos SET video_path = NULL WHERE video_id = ?', (video_id,))
-    conn.commit()
-    conn.close()
-
-
-# =====================================================
-# HÀM CHO VISION AI
-# =====================================================
-
-def get_videos_for_vision_analysis():
-    """Lấy video đã tải MP4 nhưng chưa phân tích Vision AI"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT video_id, video_path, category, caption FROM videos
-        WHERE video_path IS NOT NULL AND video_path != ''
-        AND (vision_analyzed IS NULL OR vision_analyzed = 0)
-        AND views > 0
-    ''')
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-def update_vision_results(video_id, description, new_category=None):
-    """Cập nhật mô tả Vision AI và (tuỳ chọn) ghi đè danh mục"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    if new_category:
-        cursor.execute('''
-            UPDATE videos SET 
-                video_description = ?,
-                category = ?,
-                vision_analyzed = 1
-            WHERE video_id = ?
-        ''', (description, new_category, video_id))
-    else:
-        cursor.execute('''
-            UPDATE videos SET 
-                video_description = ?,
-                vision_analyzed = 1
-            WHERE video_id = ?
-        ''', (description, video_id))
-    conn.commit()
-    conn.close()
-
-
-def get_videos_with_khac_category():
-    """Lấy video vẫn còn danh mục '🌍 Khác' để xử lý đặc biệt (tải + phân loại lại)"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT video_id, link, caption, video_path, category FROM videos
-        WHERE category = '🌍 Khác'
-        AND views > 0
-    ''')
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
+    """Lấy toàn bộ video cho Dashboard"""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute('SELECT * FROM videos WHERE views > 0 ORDER BY viral_probability DESC NULLS LAST, scrape_date DESC')
+            return cursor.fetchall()
+    finally:
+        conn.close()
 
 def reset_all_analysis_status():
-    """Xóa tất cả cờ phân tích để AI Core có thể duyệt lại toàn bộ data"""
-    conn = _get_conn()
-    cursor = conn.cursor()
-    print("[!] Đang reset trạng thái phân tích cho toàn bộ dữ liệu...")
-    cursor.execute('''
-        UPDATE videos SET 
-            sentiment_analyzed = 0, 
-            vision_analyzed = 0
-    ''')
-    conn.commit()
-    conn.close()
-    print("[✓] Đã reset xong. AI Core sẽ quét lại toàn bộ video.")
+    """Reset TOÀN BỘ database để AI Core có thể phân tích lại từ đầu"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE videos SET ai_status = 'pending'")
+            conn.commit()
+            print("[✓] Reset all videos to 'pending' success.")
+    finally:
+        conn.close()
+
+def extract_video_id(url):
+    try: return url.split('/video/')[1].split('?')[0]
+    except: return None
+
+if __name__ == "__main__":
+    init_db()
