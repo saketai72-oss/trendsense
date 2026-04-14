@@ -385,20 +385,28 @@ def _calculate_metrics(video_data):
     import time as _time
     import math
 
-    views = video_data.get("views", 0) or 0
-    likes = video_data.get("likes", 0) or 0
-    comments = video_data.get("comments", 0) or 0
-    shares = video_data.get("shares", 0) or 0
-    saves = video_data.get("saves", 0) or 0
-    create_time = video_data.get("create_time", 0) or 0
+    # Ép kiểu an toàn về số nguyên
+    try:
+        views = int(video_data.get("views", 0) or 0)
+        likes = int(video_data.get("likes", 0) or 0)
+        comments = int(video_data.get("comments", 0) or 0)
+        shares = int(video_data.get("shares", 0) or 0)
+        saves = int(video_data.get("saves", 0) or 0)
+        create_time = int(video_data.get("create_time", 0) or 0)
+    except (ValueError, TypeError):
+        # Fallback nếu dữ liệu rác
+        return {"vph": 0, "er": 0, "velocity": 0}
 
     current = int(_time.time())
+    # Tính tuổi video theo giờ (tối thiểu 0.1h để tránh chia cho 0)
     age_h = max((current - create_time) / 3600, 0.1) if create_time > 0 else 0.1
     vph = round(views / age_h, 2)
 
+    # Điểm tương tác: Like(1) + Cmt(2) + Save(3) + Share(4)
     eng_pts = likes + (comments * 2) + (saves * 3) + (shares * 4)
     er = round((eng_pts / views) * 100, 2) if views > 0 else 0.0
 
+    # Viral Velocity: Tốc độ lan truyền dựa trên VPH và ER theo thang log
     velocity = round((vph * er) / math.log10(age_h + 10), 2)
 
     return {"vph": vph, "er": er, "velocity": velocity}

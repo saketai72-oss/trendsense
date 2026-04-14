@@ -62,8 +62,6 @@ def _trigger_modal(video_id, url, video_data, top_comments):
         print(f"  [!] Lỗi kết nối Modal: {str(e)[:60]}")
 
 
-import random
-
 def main():
     init_db()
     driver = init_driver()
@@ -136,7 +134,7 @@ def main():
             # Chuẩn bị data cho database
             video_data = {
                 'link': link,
-                'create_time': stats['Create_Time'],
+                'create_time': int(stats['Create_Time'] or 0),
                 'caption': stats['Caption'],
                 'views': stats['Views'],
                 'likes': stats['Likes'],
