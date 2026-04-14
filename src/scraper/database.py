@@ -180,7 +180,7 @@ def get_recent_videos(days=14):
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute('SELECT * FROM videos WHERE scrape_date >= %s AND ai_status = "completed" AND views > 0', (cutoff,))
+            cursor.execute("SELECT * FROM videos WHERE scrape_date >= %s AND ai_status = 'completed' AND views > 0", (cutoff,))
             return cursor.fetchall()
     finally:
         conn.close()
