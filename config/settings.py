@@ -38,7 +38,7 @@ VIDEOS_DIR = os.path.join(DATA_DIR, 'videos')
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
 # === BIẾN TOÀN CỤC ĐIỀU KHIỂN ===
-MAX_VIDEOS = 30
+MAX_VIDEOS = 3
 SLIDING_WINDOW_DAYS = 14  # Chỉ train trên data 2 tuần gần nhất
 
 # --- CẤU HÌNH TẢI VIDEO ---
