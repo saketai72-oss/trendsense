@@ -22,10 +22,10 @@ jobs:
       - name: 📥 Kéo code từ repo
         uses: actions/checkout@v4
 
-      - name: 🐍 Cài đặt Python 3.12
+      - name: 🐍 Cài đặt Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
           cache: 'pip'
 
       - name: 📦 Cài đặt thư viện (Scraper only — Không cần Torch/AI)

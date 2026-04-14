@@ -10,6 +10,7 @@ undetected-chromedriver==3.5.5
 requests==2.33.0
 
 # --- Utils ---
+setuptools
 python-dotenv==1.2.2
 psycopg2-binary==2.9.11
 langdetect==1.0.9
