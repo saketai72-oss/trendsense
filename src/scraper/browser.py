@@ -42,8 +42,10 @@ def init_driver():
     options.add_argument('--window-size=1920,1080')
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')  # KHẮC PHỤC TREO GH ACTIONS (>2 hours hang fix)
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+    options.page_load_strategy = 'eager'  # Không chờ load toàn bộ ảnh/video, chỉ lấy HTML
 
     # 2. Radar dò tìm phiên bản Chrome để khớp Driver
     v_main = get_chrome_version()
@@ -71,5 +73,9 @@ def init_driver():
         use_subprocess=True,
         version_main=v_main
     )
+    
+    # Thiết lập timeout để không bao giờ bị kẹt quá thời gian
+    driver.set_page_load_timeout(60)
+    driver.implicitly_wait(10)
     
     return driver

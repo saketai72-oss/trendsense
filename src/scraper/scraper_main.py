@@ -64,10 +64,13 @@ def _trigger_modal(video_id, url, video_data, top_comments):
 def main():
     init_db()
     driver = init_driver()
-    driver.get("https://www.tiktok.com/explore")
-
-    print("👉 Đang tải TikTok với Profile đã lưu...")
-    time.sleep(8)
+    try:
+        driver.get("https://www.tiktok.com/explore")
+        print("👉 Đang tải TikTok với Profile đã lưu...")
+        time.sleep(8)
+    except Exception as e:
+        print(f"[!] Lỗi khi tải trang chủ (Timeout?): {e}")
+        # Chạy tiếp hy vọng JS vẫn hoạt động hoặc thử lại
 
     # 1. Tìm danh sách link
     links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
@@ -79,8 +82,12 @@ def main():
     # 2. Xử lý từng link
     for i, link in enumerate(links, 1):
         print(f"\n[{i}/{len(links)}] Đang cào: {link}")
-        driver.get(link)
-        time.sleep(4)
+        try:
+            driver.get(link)
+            time.sleep(4)
+        except Exception as e:
+            print(f"  [!] Gặp lỗi khi truy cập link (Timeout video này): {e} -> Bỏ qua.")
+            continue
 
         # Bóc tách các chỉ số cơ bản
         stats = extract_basic_stats(driver.page_source)
