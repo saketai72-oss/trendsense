@@ -5,6 +5,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import time
+import requests
 from datetime import datetime
 
 try:
@@ -19,6 +20,45 @@ from src.scraper.database import init_db, extract_video_id, mark_as_scraped, ins
 from src.scraper.link_crawler import get_trending_links
 from src.scraper.content_parser import extract_basic_stats, extract_top_comments
 
+
+
+def _trigger_modal(video_id, url, video_data, top_comments):
+    """
+    Gửi nhỏ giọt (drip-feed) từng video sang Modal AI Core.
+    Fire-and-forget: Modal spawn GPU worker bất đồng bộ.
+    Nếu MODAL_WEBHOOK_URL không được cấu hình → bỏ qua.
+    """
+    modal_url = settings.MODAL_WEBHOOK_URL
+    if not modal_url:
+        return
+
+    payload = {
+        "video_id": video_id,
+        "url": url,
+        "caption": video_data.get("caption", ""),
+        "views": video_data.get("views", 0),
+        "likes": video_data.get("likes", 0),
+        "comments": video_data.get("comments", 0),
+        "shares": video_data.get("shares", 0),
+        "saves": video_data.get("saves", 0),
+        "create_time": video_data.get("create_time", 0),
+        "top_comments": [
+            {"text": c.get("text", ""), "likes": c.get("likes_num", 0)}
+            for c in (top_comments or [])
+        ],
+    }
+
+    try:
+        resp = requests.post(modal_url, json=payload, timeout=15)
+        if resp.status_code == 200:
+            result = resp.json()
+            print(f"  [🚀] Đã gửi sang Modal AI → {result.get('status', 'ok')}")
+        else:
+            print(f"  [!] Modal HTTP {resp.status_code}: {resp.text[:80]}")
+    except requests.exceptions.Timeout:
+        print(f"  [!] Modal timeout (vẫn có thể đã nhận request).")
+    except Exception as e:
+        print(f"  [!] Lỗi kết nối Modal: {str(e)[:60]}")
 
 
 def main():
@@ -99,6 +139,9 @@ def main():
             insert_video_metadata(video_id, video_data)
             saved_count += 1
             print(f"  [✓] Đã lưu metadata video {video_id} vào DB.")
+
+            # 🚀 Nhỏ giọt: Gửi NGAY video này sang Modal AI Core xử lý
+            _trigger_modal(video_id, link, video_data, top_5_comments)
 
 
     # 4. Dọn dẹp

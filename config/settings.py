@@ -18,6 +18,8 @@ SRC_DIR = os.path.join(BASE_DIR, 'src')
 
 # --- BẢO MẬT & API KEYS ---
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+MODAL_WEBHOOK_URL = os.getenv("MODAL_WEBHOOK_URL", "")
 
 # --- ĐƯỜNG DẪN CHO SCRAPER ---
 EDGE_PROFILE_DIR = os.path.join(DATA_DIR, 'edge_profile')
@@ -70,6 +72,9 @@ WHISPER_COMPUTE_TYPE = "int8"  # int8 nhanh và nhẹ cho CPU
 OCR_LANG = ['vi', 'en']        # Ngôn ngữ EasyOCR
 OCR_FRAMES = 2                 # Số frame để quét OCR (Tiết kiệm CPU)
 
-# 4. LLM (Ollama Tổng Hợp)
+# 4. LLM (Ollama Tổng Hợp — Dùng cho local dev)
 OLLAMA_MODEL = "llama3:8b"     # Có thể đổi lại phi3 nếu máy yếu
 OLLAMA_URL = "http://localhost:11434/api/generate"
+
+# 5. Cloud AI (Modal + Groq — Dùng cho production)
+# GROQ_API_KEY và MODAL_WEBHOOK_URL được set ở phần trên

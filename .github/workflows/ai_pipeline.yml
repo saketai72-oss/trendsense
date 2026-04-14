@@ -1,6 +1,6 @@
-name: 🕷️ TrendSense Data Ingestion (Mỗi 4 giờ)
+name: 🕷️ TrendSense Scrape + AI Pipeline (Mỗi 4 giờ)
 
-# Lên lịch chạy: Mỗi 4 tiếng cào dữ liệu thô đẩy lên Supabase
+# Lên lịch chạy: Mỗi 4 tiếng cào dữ liệu → gửi nhỏ giọt sang Modal GPU xử lý AI
 on:
   schedule:
     - cron: '0 */4 * * *'
@@ -10,11 +10,12 @@ permissions:
   contents: read
 
 jobs:
-  scrape-data:
+  scrape-and-trigger-ai:
     runs-on: ubuntu-latest
 
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      MODAL_WEBHOOK_URL: ${{ secrets.MODAL_WEBHOOK_URL }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
@@ -27,18 +28,23 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: 📦 Cài đặt thư viện
+      - name: 📦 Cài đặt thư viện (Scraper only — Không cần Torch/AI)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-actions.txt
 
       - name: 🌐 Cài đặt Chrome
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-      - name: 🕷️ BƯỚC 1 — Bot Selenium thu thập metadata mới
+      - name: 🕷️ SCRAPE + TRIGGER — Bot Selenium cào metadata → Gửi sang Modal AI
         run: python src/scraper/scraper_main.py
 
       - name: 📢 Thông báo
-        run: echo "[✓] Dữ liệu thô đã được đẩy lên Supabase. Chờ Local AI Worker xử lý..."
+        run: |
+          echo "============================================"
+          echo "[✓] Scraping hoàn tất!"
+          echo "[✓] Các video đã được gửi sang Modal GPU để xử lý AI."
+          echo "[✓] Kết quả sẽ tự động cập nhật vào Supabase."
+          echo "============================================"

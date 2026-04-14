@@ -28,3 +28,7 @@ plotly==6.6.0
 python-dotenv==1.2.2
 psycopg2-binary==2.9.11
 langdetect==1.0.9
+
+# --- Cloud AI (Modal + Groq) ---
+groq
+modal
