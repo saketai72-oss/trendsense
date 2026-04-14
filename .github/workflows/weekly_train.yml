@@ -1,20 +1,23 @@
 name: 🧠 Weekly Model Retrain (Chủ Nhật Nửa Đêm)
 
-# Chạy nửa đêm Chủ Nhật (00:00 ICT = 17:00 UTC ngày CN) + bấm tay
+# Chạy nửa đêm Chủ Nhật: Huấn luyện lại model dựa trên dữ liệu đã được AI xử lý
 on:
   schedule:
-    - cron: '0 17 * * 0'  # 17:00 UTC = 00:00 ICT (GMT+7), Chủ Nhật
+    - cron: '0 17 * * 0'  # 17:00 UTC = 00:00 ICT
   workflow_dispatch:
 
 permissions:
-  contents: write  # Cần quyền ghi để push model file mới
+  contents: write
 
 jobs:
   retrain-model:
     runs-on: ubuntu-latest
 
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     steps:
-      - name: 📥 Kéo code từ kho về máy ảo
+      - name: 📥 Kéo code từ repo
         uses: actions/checkout@v4
 
       - name: 🐍 Cài đặt Python 3.10
@@ -25,27 +28,19 @@ jobs:
 
       - name: 📦 Cài đặt thư viện
         run: |
-          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip
           pip install -r requirements.txt --only-binary scikit-learn
 
-      - name: 🌐 Cài đặt trình duyệt Chrome
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-
-      - name: 🕷️ BƯỚC 1 — Cào batch data mới nhất trước khi train
+      - name: 🕷️ BƯỚC 1 — Cào stats mới nhất
         run: python src/scraper/scraper_main.py
 
-      - name: 🧠 BƯỚC 2 — Phân tích NLP video mới
-        run: python src/ai_core/ai_core_main.py
-
-      - name: 🎓 BƯỚC 3 — Train model (Sliding Window 14 ngày)
+      - name: 🎓 BƯỚC 2 — Train model (Dựa trên data đã được Local AI phân tích)
         run: python src/ai_core/train_model.py
 
-      - name: 💾 BƯỚC 4 — Push model file lên GitHub
+      - name: 💾 BƯỚC 3 — Push model lên repository
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add -f data/models/rf_model.joblib data/models/metrics.json
-          git commit -m "🧠 Weekly retrain model [skip ci]" || echo "Model không đổi"
+          git commit -m "🧠 Weekly model update [skip ci]" || echo "No changes"
           git push origin main

@@ -26,4 +26,5 @@ plotly==6.6.0
 
 # --- Utils ---
 python-dotenv==1.2.2
+psycopg2-binary==2.11.0
 langdetect==1.0.9

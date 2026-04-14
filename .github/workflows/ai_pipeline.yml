@@ -1,20 +1,23 @@
-name: ⚡ Scrape & Inference (Mỗi 4 giờ)
+name: 🕷️ TrendSense Data Ingestion (Mỗi 4 giờ)
 
-# Lên lịch chạy: Mỗi 4 tiếng và cho phép bấm chạy bằng tay
+# Lên lịch chạy: Mỗi 4 tiếng cào dữ liệu thô đẩy lên Supabase
 on:
   schedule:
     - cron: '0 */4 * * *'
   workflow_dispatch:
 
 permissions:
-  contents: read  # Chỉ cần quyền đọc code, KHÔNG push gì lên repo
+  contents: read
 
 jobs:
-  scrape-and-predict:
+  scrape-data:
     runs-on: ubuntu-latest
 
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     steps:
-      - name: 📥 Kéo code từ kho về máy ảo
+      - name: 📥 Kéo code từ repo
         uses: actions/checkout@v4
 
       - name: 🐍 Cài đặt Python 3.10
@@ -25,16 +28,16 @@ jobs:
 
       - name: 📦 Cài đặt thư viện
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          pip install -r requirements.txt --only-binary scikit-learn
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: 🌐 Cài đặt trình duyệt Chrome
+      - name: 🌐 Cài đặt Chrome
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-      - name: 🕷️ BƯỚC 1 — Bot Selenium cào data mới → SQLite
+      - name: 🕷️ BƯỚC 1 — Bot Selenium thu thập metadata mới
         run: python src/scraper/scraper_main.py
 
-      - name: 🧠 BƯỚC 2 — AI phân tích NLP (chỉ video mới) + Predict (model sẵn)
-        run: python src/ai_core/ai_core_main.py
+      - name: 📢 Thông báo
+        run: echo "[✓] Dữ liệu thô đã được đẩy lên Supabase. Chờ Local AI Worker xử lý..."
