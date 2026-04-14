@@ -110,8 +110,9 @@ def main():
         # 3. Đóng gói dữ liệu và ghi vào Postgres
         video_id = extract_video_id(link)
         if video_id:
-            mark_as_scraped(video_id)
-            print(f"  [*] Đã cất ID {video_id} vào kho chống trùng.")
+            # CHÚ Ý: Không gọi mark_as_scraped ngay đây nữa. 
+            # Ta chỉ mark sau khi đã lưu metadata thành công vào bảng videos.
+            print(f"  [*] Đang xử lý ID {video_id}...")
 
             # Chuẩn bị data cho database
             video_data = {
@@ -136,12 +137,19 @@ def main():
                     video_data[f'top{idx+1}_likes'] = 0
 
             # Ghi vào PostgreSQL
-            insert_video_metadata(video_id, video_data)
-            saved_count += 1
-            print(f"  [✓] Đã lưu metadata video {video_id} vào DB.")
-
-            # 🚀 Nhỏ giọt: Gửi NGAY video này sang Modal AI Core xử lý
-            _trigger_modal(video_id, link, video_data, top_5_comments)
+            success = insert_video_metadata(video_id, video_data)
+            
+            if success:
+                saved_count += 1
+                print(f"  [✓] Đã lưu metadata video {video_id} vào DB.")
+                
+                # CHỈ khi lưu DB thành công mới đánh dấu history để không cào lại
+                mark_as_scraped(video_id)
+                
+                # 🚀 Nhỏ giọt: Gửi video này sang Modal AI Core xử lý
+                _trigger_modal(video_id, link, video_data, top_5_comments)
+            else:
+                print(f"  [!] Thất bại khi lưu video {video_id} vào DB. Sẽ không đánh dấu history.")
 
 
     # 4. Dọn dẹp

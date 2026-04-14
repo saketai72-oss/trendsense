@@ -72,10 +72,18 @@ def init_db():
         conn.close()
 
 def insert_video_metadata(video_id, data_dict):
-    """Ghi dữ liệu thô từ TikTok (UPSERT nếu trùng ID)"""
+    """Ghi dữ liệu thô từ TikTok (UPSERT nếu trùng ID). Trả về True/False."""
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # Ép kiểu dữ liệu để an toàn tuyệt đối khi vào Postgres
+            views = int(data_dict.get('views', 0))
+            likes = int(data_dict.get('likes', 0))
+            comments = int(data_dict.get('comments', 0))
+            shares = int(data_dict.get('shares', 0))
+            saves = int(data_dict.get('saves', 0))
+            create_time = int(data_dict.get('create_time', 0))
+
             query = '''
                 INSERT INTO videos (
                     video_id, link, caption, views, likes, comments, shares, saves,
@@ -96,25 +104,22 @@ def insert_video_metadata(video_id, data_dict):
                 video_id,
                 data_dict.get('link', ''),
                 data_dict.get('caption', ''),
-                data_dict.get('views', 0),
-                data_dict.get('likes', 0),
-                data_dict.get('comments', 0),
-                data_dict.get('shares', 0),
-                data_dict.get('saves', 0),
-                data_dict.get('create_time', 0),
+                views, likes, comments, shares, saves,
+                create_time,
                 data_dict.get('scrape_date', datetime.now().date().isoformat()),
-                data_dict.get('top1_cmt', ''), data_dict.get('top1_likes', 0),
-                data_dict.get('top2_cmt', ''), data_dict.get('top2_likes', 0),
-                data_dict.get('top3_cmt', ''), data_dict.get('top3_likes', 0),
-                data_dict.get('top4_cmt', ''), data_dict.get('top4_likes', 0),
-                data_dict.get('top5_cmt', ''), data_dict.get('top5_likes', 0)
+                data_dict.get('top1_cmt', ''), int(data_dict.get('top1_likes', 0)),
+                data_dict.get('top2_cmt', ''), int(data_dict.get('top2_likes', 0)),
+                data_dict.get('top3_cmt', ''), int(data_dict.get('top3_likes', 0)),
+                data_dict.get('top4_cmt', ''), int(data_dict.get('top4_likes', 0)),
+                data_dict.get('top5_cmt', ''), int(data_dict.get('top5_likes', 0))
             ))
 
-            cursor.execute('INSERT INTO history (video_id) VALUES (%s) ON CONFLICT DO NOTHING', (video_id,))
             conn.commit()
+            return True
     except Exception as e:
-        print(f"[ERROR] insert_video_metadata failed: {e}")
+        print(f"[ERROR] insert_video_metadata failed for {video_id}: {e}")
         conn.rollback()
+        return False
     finally:
         conn.close()
 
