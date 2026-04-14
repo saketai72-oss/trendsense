@@ -67,24 +67,30 @@ def main():
     try:
         driver.get("https://www.tiktok.com/explore")
         print("👉 Đang tải TikTok với Profile đã lưu...")
-        time.sleep(8)
+        time.sleep(5)  # Giảm từ 8s → 5s (headless eager load nhanh hơn)
     except Exception as e:
         print(f"[!] Lỗi khi tải trang chủ (Timeout?): {e}")
-        # Chạy tiếp hy vọng JS vẫn hoạt động hoặc thử lại
 
-    # 1. Tìm danh sách link
+    # 1. Thu thập POOL link dự phòng (gấp 3x target)
     links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
 
     print("\n===== BẮT ĐẦU THU THẬP DỮ LIỆU =====\n")
     today = datetime.now().date().isoformat()
     saved_count = 0
+    skipped_lang = 0
+    target = settings.MAX_VIDEOS
 
-    # 2. Xử lý từng link
+    # 2. Duyệt pool link — DỪNG SỚM khi đủ target video Việt
     for i, link in enumerate(links, 1):
-        print(f"\n[{i}/{len(links)}] Đang cào: {link}")
+        # ĐỦ RỒI → dừng sớm, không cào thêm
+        if saved_count >= target:
+            print(f"\n[✓] Đã đủ {target} video Việt — Dừng cào sớm!")
+            break
+
+        print(f"\n[{i}/{len(links)}] Đang cào: {link}  (Đã lưu: {saved_count}/{target})")
         try:
             driver.get(link)
-            time.sleep(4)
+            time.sleep(2.5)  # Giảm từ 4s → 2.5s (eager strategy đã tải DOM xong)
         except Exception as e:
             print(f"  [!] Gặp lỗi khi truy cập link (Timeout video này): {e} -> Bỏ qua.")
             continue
@@ -92,14 +98,14 @@ def main():
         # Bóc tách các chỉ số cơ bản
         stats = extract_basic_stats(driver.page_source)
 
-        # Chốt chặn ngôn ngữ: Chỉ lấy video Tiếng Việt
+        # === BỘ LỌC NGÔN NGỮ (TRƯỚC KHI CÀO COMMENTS — TIẾT KIỆM THỜI GIAN) ===
         caption_text = stats.get('Caption', '').strip()
         if caption_text:
             try:
-                # Kiểm tra ngôn ngữ của caption
                 lang = detect(caption_text)
                 if lang != 'vi':
-                    print(f"  [✂️] Bỏ qua video quốc tế (Ngôn ngữ: {lang}).")
+                    skipped_lang += 1
+                    print(f"  [✂️] Bỏ qua video quốc tế (Ngôn ngữ: {lang}). Đã bỏ qua: {skipped_lang}")
                     
                     # Vẫn đánh dấu là đã cào để không bị lặp lại lần sau
                     video_id = extract_video_id(link)
@@ -107,18 +113,16 @@ def main():
                         mark_as_scraped(video_id)
                     continue
             except LangDetectException:
-                # Nếu caption chỉ toàn emoji hoặc số (không detect được)
+                # Nếu caption chỉ toàn emoji hoặc số (không detect được) → cho qua
                 pass
 
-        # Bóc tách Top 5 bình luận
+        # Bóc tách Top 5 bình luận (CHỈ chạy cho video đã qua bộ lọc ngôn ngữ)
         has_comments = stats['Comments'] > 0
         top_5_comments = extract_top_comments(driver, has_comments)
 
         # 3. Đóng gói dữ liệu và ghi vào Postgres
         video_id = extract_video_id(link)
         if video_id:
-            # CHÚ Ý: Không gọi mark_as_scraped ngay đây nữa. 
-            # Ta chỉ mark sau khi đã lưu metadata thành công vào bảng videos.
             print(f"  [*] Đang xử lý ID {video_id}...")
 
             # Chuẩn bị data cho database
@@ -148,7 +152,7 @@ def main():
             
             if success:
                 saved_count += 1
-                print(f"  [✓] Đã lưu metadata video {video_id} vào DB.")
+                print(f"  [✓] Đã lưu metadata video {video_id} vào DB. ({saved_count}/{target})")
                 
                 # CHỈ khi lưu DB thành công mới đánh dấu history để không cào lại
                 mark_as_scraped(video_id)
@@ -167,8 +171,17 @@ def main():
         # Lỗi handle invalid trên Windows thường không gây hại, ta có thể bỏ qua
         pass
 
+    # 5. Báo cáo kết quả
+    print(f"\n{'=' * 50}")
+    print(f"📊 BÁO CÁO MẺ CÀO:")
+    print(f"   🔗 Tổng link duyệt: {min(i if 'i' in dir() else len(links), len(links))}")
+    print(f"   ✅ Video Việt đã lưu: {saved_count}/{target}")
+    print(f"   ✂️  Video quốc tế bị lọc: {skipped_lang}")
+    print(f"{'=' * 50}")
+
     if saved_count == 0 and len(links) > 0:
-        print("[!] CẢNH BÁO: Tìm thấy link nhưng không lưu được video nào. Có thể do bị trùng ID hoàn toàn trong DB.")
+        print("[!] CẢNH BÁO: Tìm thấy link nhưng không lưu được video nào.")
+        print("    → Nguyên nhân có thể: Toàn video quốc tế hoặc trùng ID trong DB.")
     
     print(f"\n[+] ĐÃ XONG MẺ CÀO NÀY! Lưu {saved_count} video vào database.")
 

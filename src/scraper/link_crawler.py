@@ -7,19 +7,28 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import settings
 
+# Hệ số nhân: Thu thập gấp bao nhiêu lần target để dự phòng bị lọc ngôn ngữ
+BUFFER_MULTIPLIER = 3
+
+
 def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
+    """
+    Thu thập link video từ trang Explore.
+    Luôn thu gấp BUFFER_MULTIPLIER lần target_count để dự phòng
+    bị lọc ngôn ngữ (video quốc tế) → tránh lãng phí thời gian.
+    """
+    buffer_target = target_count * BUFFER_MULTIPLIER
     links = []
     scroll_attempts = 0
     MAX_SCROLLS = 50
-    print(f"[*] Lướt tìm {target_count} video mới toanh...")
+    print(f"[*] Lướt tìm tối đa {buffer_target} link dự phòng (cần {target_count} video Việt)...")
     
-    while len(links) < target_count and scroll_attempts < MAX_SCROLLS:
+    while len(links) < buffer_target and scroll_attempts < MAX_SCROLLS:
         # Kiểm tra xem có video nào trên trang không
         videos = driver.find_elements(By.CSS_SELECTOR, "a[href*='/video/']")
         
         if not videos:
             print(f"  [?] Không thấy video nào ở lần lướt {scroll_attempts+1}... Có thể do Captcha hoặc mạng chậm.")
-            # Chụp ảnh (ẩn) để debug nếu cần, nhưng tạm thời đợi lâu hơn
             time.sleep(3)
 
         for v in videos:
@@ -32,20 +41,21 @@ def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
                         clean_link = raw_link.split('?')[0]
                         if clean_link not in links:
                             links.append(clean_link)
-                            print(f"  + Chốt video MỚI: {video_id} ({len(links)}/{target_count})")
+                            print(f"  + Chốt video MỚI: {video_id} ({len(links)}/{buffer_target})")
                     else:
-                        # LOG NÀY QUAN TRỌNG: Để biết bạn đã cào hết trend cũ chưa
-                        pass # Nếu in quá nhiều sẽ bị rác log, tôi sẽ chỉ in nếu 10 lần liên tiếp skip
+                        pass
                 
-                if len(links) >= target_count: 
+                if len(links) >= buffer_target: 
                     break
             except: continue
             
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)
+        time.sleep(1.5)  # Giảm từ 2s → 1.5s (headless không cần render)
         scroll_attempts += 1
         
     if not links:
         print("[!] ⚠️ CẢNH BÁO: Cuối cùng vẫn không tìm thấy link nào. Kiểm tra lại trình duyệt (có thể bị Captcha).")
+    else:
+        print(f"[✓] Thu thập được {len(links)} link ứng viên.")
         
     return links
