@@ -5,6 +5,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import time
+import random
 import requests
 from datetime import datetime
 
@@ -61,15 +62,22 @@ def _trigger_modal(video_id, url, video_data, top_comments):
         print(f"  [!] Lỗi kết nối Modal: {str(e)[:60]}")
 
 
+import random
+
 def main():
     init_db()
     driver = init_driver()
     try:
-        driver.get("https://www.tiktok.com/explore")
-        print("👉 Đang tải TikTok với Profile đã lưu...")
+        # TĂNG TỶ LỆ VIDEO VIỆT NAM (Tránh lỗi do bắt IP quốc tế)
+        vn_tags = ["xuhuong", "xuhuongtiktok", "giaitri", "vietnam", "tintuc", "haihuoc"]
+        target_tag = random.choice(vn_tags)
+        url = f"https://www.tiktok.com/tag/{target_tag}"
+        
+        driver.get(url)
+        print(f"👉 Đang tải TikTok hashtag: #{target_tag} (Đảm bảo content Việt)...")
         time.sleep(5)  # Giảm từ 8s → 5s (headless eager load nhanh hơn)
     except Exception as e:
-        print(f"[!] Lỗi khi tải trang chủ (Timeout?): {e}")
+        print(f"[!] Lỗi khi tải trang hashtag (Timeout?): {e}")
 
     # 1. Thu thập POOL link dự phòng (gấp 3x target)
     links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
