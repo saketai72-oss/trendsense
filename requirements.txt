@@ -32,3 +32,6 @@ langdetect==1.0.9
 # --- Cloud AI (Modal + Groq) ---
 groq
 modal
+fastapi
+uvicorn
+pydantic

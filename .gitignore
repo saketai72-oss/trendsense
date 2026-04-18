@@ -30,3 +30,7 @@ Thumbs.db
 
 node_modules/
 scratch/
+frontend/node_modules/
+frontend/.next/
+.next/
+.env.local
