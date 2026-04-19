@@ -1,6 +1,6 @@
 import time
 from selenium.webdriver.common.by import By
-from database import is_scraped, extract_video_id
+from core.db.models import is_scraped, extract_video_id
 import sys
 import os
 

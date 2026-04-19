@@ -122,6 +122,20 @@ def mark_as_scraped(video_id):
     finally:
         conn.close()
 
+def extract_video_id(url: str):
+    """
+    Trích xuất Video ID từ TikTok URL.
+    Ví dụ: https://www.tiktok.com/@abc/video/123456789 -> 123456789
+    """
+    if not url:
+        return None
+    try:
+        if "/video/" in url:
+            return url.split("/video/")[1].split("?")[0].strip("/")
+        return None
+    except Exception:
+        return None
+
 def get_pending_videos():
     conn = get_connection()
     try:
