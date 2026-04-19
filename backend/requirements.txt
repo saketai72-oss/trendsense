@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv==1.2.2
+psycopg2-binary==2.9.11
+groq
+requests==2.33.0

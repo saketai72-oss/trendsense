@@ -8,13 +8,13 @@ from typing import Optional
 import math
 import re
 
-from backend.core.database import (
+from core.db.models import (
     get_all_analyzed_videos, get_video_by_id,
     get_dashboard_stats, get_category_stats,
     get_sentiment_stats, get_top_keywords,
     get_timeline_data, insert_user_video,
 )
-from backend.config.settings import STANDARD_CATEGORIES
+from core.config.backend_settings import STANDARD_CATEGORIES
 
 router = APIRouter()
 
@@ -172,7 +172,7 @@ def analyze_video(req: AnalyzeRequest):
     Trả về status & video_id ngay lập tức.
     """
     import requests
-    from backend.config.settings import MODAL_WEBHOOK_URL
+    from core.config.backend_settings import MODAL_WEBHOOK_URL
 
     url = req.url.strip()
 
@@ -270,7 +270,7 @@ def _generate_recommendations(video: dict) -> dict:
     Sinh đề xuất tối ưu bằng Groq AI (Llama 3).
     Fallback về static rules nếu Groq không khả dụng.
     """
-    from backend.config.settings import GROQ_API_KEY
+    from core.config.backend_settings import GROQ_API_KEY
 
     desc = video.get("video_description", "") or ""
     category = video.get("category", "") or ""

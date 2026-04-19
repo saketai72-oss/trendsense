@@ -31,7 +31,7 @@ jobs:
       - name: 📦 Cài đặt thư viện (Scraper only — Không cần Torch/AI)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-actions.txt
+          pip install -r services/tiktok_scraper/requirements.txt
 
       - name: 🌐 Cài đặt Chrome
         run: |
@@ -39,7 +39,9 @@ jobs:
           sudo apt-get install -y google-chrome-stable
 
       - name: 🕷️ SCRAPE + TRIGGER — Bot Selenium cào metadata → Gửi sang Modal AI
-        run: python src/scraper/scraper_main.py
+        env:
+          PYTHONPATH: .
+        run: python -m services.tiktok_scraper.scraper_main
 
       - name: 📢 Thông báo
         run: |

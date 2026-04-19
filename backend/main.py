@@ -2,12 +2,12 @@
 TrendSense Backend — FastAPI Application
 =========================================
 Cung cấp REST API cho React Frontend.
-Chạy: uvicorn backend.main:app --reload --port 8000
+Chạy: python -m uvicorn backend.main:app --reload --port 8000
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import router
-from backend.config.settings import FRONTEND_URL
+from core.config.backend_settings import FRONTEND_URL
 
 app = FastAPI(
     title="TrendSense API",

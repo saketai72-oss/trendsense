@@ -30,13 +30,18 @@ jobs:
       - name: 📦 Cài đặt thư viện
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt --only-binary scikit-learn
+          pip install -r services/tiktok_scraper/requirements.txt
+          pip install -r services/ai_engine/requirements.txt --only-binary scikit-learn
 
       - name: 🕷️ BƯỚC 1 — Cào stats mới nhất
-        run: python src/scraper/scraper_main.py
+        env:
+          PYTHONPATH: .
+        run: python -m services.tiktok_scraper.scraper_main
 
       - name: 🎓 BƯỚC 2 — Train model (Dựa trên data đã được Local AI phân tích)
-        run: python src/ai_core/train_model.py
+        env:
+          PYTHONPATH: .
+        run: python -m services.ai_engine.train_model
 
       - name: 💾 BƯỚC 3 — Push model lên repository
         run: |
