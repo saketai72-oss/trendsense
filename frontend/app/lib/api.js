@@ -3,7 +3,9 @@
  * Centralizes all fetch calls to the FastAPI backend.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+// Relative path — Next.js proxies /api/* → http://localhost:8000/api/* via next.config.mjs rewrites.
+// This avoids all CORS and cross-origin issues regardless of IPv4/IPv6.
+const API_BASE = "/api";
 
 async function fetcher(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {

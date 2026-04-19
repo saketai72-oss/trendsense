@@ -19,7 +19,7 @@ METRICS_PATH = os.path.join(MODEL_DIR, 'metrics.json')
 VIDEOS_DIR = os.path.join(DATA_DIR, 'videos')
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
-MAX_VIDEOS = 3
+MAX_VIDEOS = 30
 SLIDING_WINDOW_DAYS = 14
 
 DOWNLOAD_VIDEOS = True
