@@ -12,6 +12,10 @@ import requests
 from collections import Counter
 import cv2
 from PIL import Image
+import warnings
+
+# Ẩn cảnh báo pin_memory của PyTorch khi chạy trên CPU (không có GPU)
+warnings.filterwarnings("ignore", message=".*pin_memory.*", module="torch.utils.data.dataloader")
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from core.config import service_settings as settings
