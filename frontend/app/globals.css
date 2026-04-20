@@ -3,6 +3,7 @@
 /* ==========================================
    TrendSense — Crypto Dark Theme Design System
    Inspired by modern crypto dashboards
+   8px grid rhythm · High contrast hierarchy
    ========================================== */
 
 :root {
@@ -19,7 +20,7 @@
   --accent-blue: #3b82f6;
   --accent-cyan: #06b6d4;
   --accent-pink: #ec4899;
-  --accent-green: #10b981;
+  --accent-green: #34d399; /* Bright Neon Green to match red's brightness */
   --accent-red: #ef4444;
   --accent-yellow: #f59e0b;
 
@@ -28,7 +29,7 @@
   --gradient-hero: linear-gradient(135deg, #000000 0%, #1f0404 40%, #050505 100%);
   --gradient-card: linear-gradient(135deg, #141414 0%, #1f1f1f 100%);
   --gradient-accent: linear-gradient(135deg, #dc2626 0%, #f87171 100%);
-  --gradient-neon: linear-gradient(135deg, #000000 0%, #dc2626 50%, #fca5a5 100%);
+  --gradient-neon: linear-gradient(135deg, #dc2626 0%, #f87171 50%, #fca5a5 100%);
 
   /* Text colors */
   --text-primary: #f3f4f6;
@@ -80,14 +81,17 @@ main {
 
 /* ──── Scrollbar ──── */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 ::-webkit-scrollbar-track {
   background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--accent-primary);
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(220, 38, 38, 0.5);
 }
 
 /* ──── Glassmorphism Card ──── */
@@ -119,6 +123,7 @@ main {
   padding: 1px;
   background: var(--gradient-neon);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   opacity: 0;
@@ -178,32 +183,47 @@ main {
 .btn-primary {
   background: var(--gradient-primary);
   color: white;
-  font-weight: 600;
-  padding: 0.75rem 1.5rem;
-  border-radius: 12px;
+  font-weight: 700;
+  padding: 1rem 2rem;
+  border-radius: 14px;
   border: none;
   cursor: pointer;
-  transition: all 0.3s;
-  box-shadow: 0 4px 15px rgba(220, 38, 38, 0.3);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 4px 20px rgba(220, 38, 38, 0.35);
+  font-size: 1rem;
+  letter-spacing: 0.01em;
 }
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 25px rgba(220, 38, 38, 0.5);
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 8px 16px rgba(220, 38, 38, 0.4), 0 0 12px rgba(220, 38, 38, 0.2);
+}
+.btn-primary:active {
+  transform: translateY(-1px) scale(0.99);
 }
 
 .btn-outline {
   background: transparent;
   color: var(--accent-primary);
-  font-weight: 600;
-  padding: 0.75rem 1.5rem;
-  border-radius: 12px;
-  border: 1px solid var(--accent-primary);
+  font-weight: 700;
+  padding: 1rem 2rem;
+  border-radius: 14px;
+  border: 1.5px solid var(--accent-primary);
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-size: 1rem;
 }
 .btn-outline:hover {
-  background: rgba(220, 38, 38, 0.1);
-  box-shadow: var(--shadow-neon);
+  background: rgba(220, 38, 38, 0.12);
+  box-shadow: 0 0 24px rgba(220, 38, 38, 0.3);
+  transform: translateY(-2px);
+}
+
+/* Smaller variant for inline/table use */
+.btn-primary.text-sm,
+.btn-outline.text-sm {
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  border-radius: 12px;
 }
 
 /* ──── Badge / Tag ──── */
@@ -223,10 +243,14 @@ main {
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+/* Minimalist category badge — dark bg, subtle colored text */
 .badge-category {
-  background: rgba(220, 38, 38, 0.15);
-  color: #fca5a5;
-  border: 1px solid rgba(220, 38, 38, 0.3);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-weight: 500;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.6rem;
 }
 
 /* ──── Table ──── */
@@ -237,18 +261,23 @@ main {
 }
 
 .data-table thead th {
-  padding: 1rem;
+  padding: 0.875rem 1rem;
   text-align: left;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+/* Right-align numeric column headers */
+.data-table thead th.text-right {
+  text-align: right;
 }
 
 .data-table tbody tr {
@@ -260,24 +289,30 @@ main {
 }
 
 .data-table tbody td {
-  padding: 0.875rem 1rem;
-  border-bottom: 1px solid rgba(220, 38, 38, 0.07);
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   font-size: 0.875rem;
+}
+
+/* Right-align numeric cells */
+.data-table tbody td.text-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ──── Progress Bar (Viral %) ──── */
 .viral-bar {
   width: 100%;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 3px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
   overflow: hidden;
   position: relative;
 }
 
 .viral-bar-fill {
   height: 100%;
-  border-radius: 3px;
+  border-radius: 2px;
   transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -321,7 +356,7 @@ main {
 
 .input-dark:focus {
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
+  box-shadow: 0 0 0 1px var(--accent-primary);
 }
 
 .input-dark::placeholder {
@@ -344,4 +379,92 @@ main {
 .keyword-tag:hover {
   background: linear-gradient(135deg, rgba(220, 38, 38, 0.4), rgba(59, 130, 246, 0.4));
   border-color: var(--accent-primary);
+}
+
+/* ──── Tech Tag (Footer) — Grayscale with color on hover ──── */
+.tech-tag {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  letter-spacing: 0.02em;
+}
+
+.tech-tag:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--accent-secondary);
+  border-color: rgba(220, 38, 38, 0.25);
+  box-shadow: 0 0 12px rgba(220, 38, 38, 0.15);
+}
+
+/* ──── Category Card — Hover reveal for secondary metrics ──── */
+.category-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.category-card .secondary-metrics {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s ease,
+              margin-top 0.3s ease;
+  margin-top: 0;
+}
+
+.category-card:hover .secondary-metrics {
+  max-height: 120px;
+  opacity: 1;
+  margin-top: 16px;
+}
+
+/* ──── How-it-works Step Card ──── */
+.step-card .step-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  margin: 0 auto 20px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.step-card:hover .step-icon {
+  transform: scale(1.08);
+  box-shadow: 0 0 20px rgba(220, 38, 38, 0.2);
+}
+
+.step-card .step-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.step-card .step-desc {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+/* ──── Hero section overrides ──── */
+.hero-title {
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.hero-subtitle {
+  color: var(--text-secondary);
+  line-height: 1.7;
+  opacity: 0.85;
 }

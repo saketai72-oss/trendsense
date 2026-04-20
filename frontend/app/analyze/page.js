@@ -127,7 +127,7 @@ export default function AnalyzePage() {
       <main className="pb-10 min-h-screen w-full">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 w-full">
           {/* Header */}
-          <div className="text-center mb-10 mt-8">
+          <div className="text-center mb-6 mt-4">
             <span className="text-xs font-semibold tracking-widest uppercase"
               style={{ color: "var(--accent-primary)" }}>PHÂN TÍCH ON-DEMAND</span>
             <h1 className="text-3xl sm:text-4xl font-bold mt-3">
@@ -148,7 +148,7 @@ export default function AnalyzePage() {
                 <input
                   type="url"
                   placeholder="https://www.tiktok.com/@username/video/7384..."
-                  className="input-dark text-base"
+                  className="input-dark text-base h-[52px]"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   required
@@ -163,7 +163,7 @@ export default function AnalyzePage() {
                 </div>
               )}
 
-              <button type="submit" className="btn-primary w-full text-base" disabled={loading}>
+              <button type="submit" className="btn-primary w-full text-base h-[52px] flex items-center justify-center gap-2" disabled={loading}>
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">
                     <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24">
@@ -179,6 +179,32 @@ export default function AnalyzePage() {
               </button>
             </form>
           </div>
+
+          {/* ═══ EMPTY STATE ═══ */}
+          {!loading && !result && !error && (
+            <div className="w-full rounded-2xl flex flex-col items-center justify-center animate-fadeInUp"
+              style={{
+                minHeight: "400px",
+                border: "1px dashed rgba(255, 255, 255, 0.15)",
+                background: "rgba(255, 255, 255, 0.01)"
+              }}>
+              <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
+                style={{ background: "rgba(255,255,255,0.03)", color: "var(--text-muted)" }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
+                  <polyline points="7.5 19.79 7.5 14.6 3 12"></polyline>
+                  <polyline points="21 12 16.5 14.6 16.5 19.79"></polyline>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold" style={{ color: "#A1A1AA" }}>Kết quả phân tích sẽ hiển thị tại đây</h3>
+              <p className="text-sm mt-2 max-w-sm text-center" style={{ color: "var(--text-muted)" }}>
+                Hệ thống sẽ bóc tách âm thanh, caption và biểu đồ tăng trưởng để dự báo độ phổ biến.
+              </p>
+            </div>
+          )}
 
           {/* ═══ PROCESSING: Video Preview + Progress ═══ */}
           {loading && videoId && (

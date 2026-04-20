@@ -16,10 +16,6 @@ echo ===================================================
 echo [*] Launching FastAPI Backend on port 8080...
 start "TrendSense-Backend" "%~dpnx0" backend
 
-:: Wait for backend
-echo [*] Waiting 10s for backend boot...
-ping 127.0.0.1 -n 11 > nul
-
 echo [*] Launching Next.js Frontend on port 3000...
 start "TrendSense-Frontend" "%~dpnx0" frontend
 
