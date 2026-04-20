@@ -28,7 +28,7 @@ export default function VideoTable({ videos, sortBy, sortOrder, onSort }) {
   return (
     <div className="glass-card overflow-hidden w-full">
       <div className="overflow-x-auto">
-        <table className="data-table">
+        <table className="data-table" style={{ borderSpacing: "0 6px", borderCollapse: "separate" }}>
           <thead>
             <tr>
               {columns.map((col) => (
@@ -54,9 +54,9 @@ export default function VideoTable({ videos, sortBy, sortOrder, onSort }) {
                 : `ID: ${(video.video_id || "").substring(0, 12)}...`;
 
               return (
-                <tr key={video.video_id || i}>
-                  <td style={{ color: "var(--text-muted)" }}>{i + 1}</td>
-                  <td>
+                <tr key={video.video_id || i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                  <td style={{ color: "var(--text-muted)", padding: "14px 12px" }}>{i + 1}</td>
+                  <td style={{ padding: "14px 12px" }}>
                     <div className="flex flex-col">
                       <a href={video.link} target="_blank" rel="noopener noreferrer"
                         className="font-medium text-sm no-underline hover:underline"
@@ -70,14 +70,16 @@ export default function VideoTable({ videos, sortBy, sortOrder, onSort }) {
                       )}
                     </div>
                   </td>
-                  <td>
+                  <td style={{ padding: "14px 12px" }}>
                     <div className="flex flex-wrap gap-1">
-                      {(video.category || "—").split("|").map((cat, ci) => (
+                      {Array.isArray(video.category) ? video.category.map((cat, ci) => (
+                        <span key={ci} className="badge badge-category">{cat}</span>
+                      )) : (typeof video.category === "string" ? video.category.split("|").map((cat, ci) => (
                         <span key={ci} className="badge badge-category">{cat.trim()}</span>
-                      ))}
+                      )) : <span className="badge badge-category">—</span>)}
                     </div>
                   </td>
-                  <td>
+                  <td style={{ padding: "14px 12px" }}>
                     <div className="flex items-center gap-2">
                       <div className="viral-bar" style={{ width: "60px" }}>
                         <div className="viral-bar-fill"
@@ -92,30 +94,30 @@ export default function VideoTable({ videos, sortBy, sortOrder, onSort }) {
                       </span>
                     </div>
                   </td>
-                  <td>
+                  <td style={{ padding: "14px 12px" }}>
                     <span className="text-sm font-medium" style={{ color: "var(--accent-cyan)" }}>
                       {(video.viral_velocity || 0).toFixed(1)}
                     </span>
                   </td>
-                  <td className="font-medium text-sm">{formatNumber(video.views)}</td>
-                  <td>
+                  <td className="font-medium text-sm" style={{ padding: "14px 12px" }}>{formatNumber(video.views)}</td>
+                  <td style={{ padding: "14px 12px" }}>
                     <span className="text-sm" style={{ color: "var(--accent-blue)" }}>
                       {(video.engagement_rate || 0).toFixed(1)}%
                     </span>
                   </td>
-                  <td>
+                  <td style={{ padding: "14px 12px" }}>
                     <a href={`/video/${video.video_id}`}
                       className="text-xs font-medium px-3 py-1.5 rounded-lg no-underline transition-all"
                       style={{
-                        background: "rgba(124, 58, 237, 0.1)",
+                        background: "rgba(220, 38, 38, 0.1)",
                         color: "var(--accent-primary)",
-                        border: "1px solid rgba(124, 58, 237, 0.2)",
+                        border: "1px solid rgba(220, 38, 38, 0.2)",
                       }}
                       onMouseEnter={(e) => {
-                        e.target.style.background = "rgba(124, 58, 237, 0.25)";
+                        e.target.style.background = "rgba(220, 38, 38, 0.25)";
                       }}
                       onMouseLeave={(e) => {
-                        e.target.style.background = "rgba(124, 58, 237, 0.1)";
+                        e.target.style.background = "rgba(220, 38, 38, 0.1)";
                       }}>
                       Chi tiết →
                     </a>

@@ -12,10 +12,10 @@ export default function Navbar() {
         backdropFilter: "blur(16px)",
         borderColor: "var(--border-color)",
       }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-16">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 w-full">
+        <div className="flex items-center justify-between md:grid md:grid-cols-12 md:gap-4 h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 no-underline">
+          <Link href="/" className="md:col-start-3 md:col-span-3 flex items-center gap-2 no-underline">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
               style={{ background: "var(--gradient-primary)" }}>
               🎯
@@ -24,7 +24,7 @@ export default function Navbar() {
           </Link>
 
           {/* Desktop Nav */}
-          <div className="hidden md:flex items-center gap-8">
+          <div className="hidden md:flex md:col-span-4 items-center gap-8 justify-center">
             {[
               { href: "/", label: "Trang Chủ" },
               { href: "/dashboard", label: "Dashboard" },
@@ -35,7 +35,7 @@ export default function Navbar() {
                 style={{ color: "var(--text-secondary)" }}
                 onMouseEnter={(e) => {
                   e.target.style.color = "var(--text-primary)";
-                  e.target.style.background = "rgba(124, 58, 237, 0.1)";
+                  e.target.style.background = "rgba(220, 38, 38, 0.1)";
                 }}
                 onMouseLeave={(e) => {
                   e.target.style.color = "var(--text-secondary)";
@@ -47,7 +47,7 @@ export default function Navbar() {
           </div>
 
           {/* CTA Button */}
-          <div className="hidden md:flex items-center gap-3">
+          <div className="hidden md:flex md:col-span-2 items-center gap-3 justify-end">
             <Link href="/analyze" className="btn-primary text-sm no-underline">
               🚀 Dự Báo Ngay
             </Link>

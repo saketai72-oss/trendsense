@@ -6,6 +6,30 @@ import StatCard from "../components/StatCard";
 import VideoTable from "../components/VideoTable";
 import { getStats, getVideos, getCategories, getKeywords, getSentiments } from "../lib/api";
 
+const STANDARD_CATEGORIES = [
+  "🎭 Giải trí", "🎵 Âm nhạc", "🍳 Ẩm thực", "💻 Công nghệ",
+  "👗 Thời trang", "📚 Giáo dục", "🏋️ Thể thao", "🐾 Động vật",
+  "💄 Làm đẹp", "📰 Tin tức", "💰 Tài chính",
+];
+
+function getPaginationPages(current, total) {
+  if (total <= 9) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = [];
+  if (current <= 5) {
+    for (let i = 1; i <= 6; i++) pages.push(i);
+    pages.push('...');
+    for (let i = total - 1; i <= total; i++) pages.push(i);
+  } else if (current >= total - 4) {
+    pages.push(1, 2, '...');
+    for (let i = total - 5; i <= total; i++) pages.push(i);
+  } else {
+    pages.push(1, '...');
+    for (let i = current - 2; i <= current + 2; i++) pages.push(i);
+    pages.push('...', total);
+  }
+  return pages;
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [videos, setVideos] = useState([]);
@@ -15,11 +39,10 @@ export default function DashboardPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [sortBy, setSortBy] = useState("viral_probability");
   const [sortOrder, setSortOrder] = useState("desc");
-  const [categoryFilter, setCategoryFilter] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState([]);
   const [sentimentFilter, setSentimentFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [minViral, setMinViral] = useState(0);
-  const [categories, setCategories] = useState([]);
   const [keywords, setKeywords] = useState([]);
   const [sentiments, setSentiments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,11 +59,10 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadMeta() {
       try {
-        const [s, c, kw, se] = await Promise.all([
-          getStats(), getCategories(), getKeywords(20), getSentiments(),
+        const [s, kw, se] = await Promise.all([
+          getStats(), getKeywords(20), getSentiments(),
         ]);
         setStats(s);
-        setCategories(c || []);
         setKeywords(kw || []);
         setSentiments(se || []);
       } catch (err) {
@@ -57,7 +79,7 @@ export default function DashboardPage() {
       const data = await getVideos({
         page, per_page: perPage,
         sort_by: sortBy, sort_order: sortOrder,
-        category: categoryFilter, sentiment: sentimentFilter,
+        category: selectedCategories.join(","), sentiment: sentimentFilter,
         search: searchQuery, min_viral: minViral,
       });
       setVideos(data.videos || []);
@@ -68,7 +90,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, perPage, sortBy, sortOrder, categoryFilter, sentimentFilter, searchQuery, minViral]);
+  }, [page, perPage, sortBy, sortOrder, selectedCategories, sentimentFilter, searchQuery, minViral]);
 
   useEffect(() => { loadVideos(); }, [loadVideos]);
 
@@ -110,7 +132,7 @@ export default function DashboardPage() {
 
           {/* Stats Row */}
           {stats && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5 mb-10">
               <StatCard icon="📹" label="Tổng Video" value={formatBigNumber(stats.total_videos)} delay={0} />
               <StatCard icon="👁️" label="Tổng Views" value={formatBigNumber(stats.total_views)} color="var(--accent-cyan)" delay={50} />
               <StatCard icon="❤️" label="Tổng Likes" value={formatBigNumber(stats.total_likes)} color="var(--accent-pink)" delay={100} />
@@ -120,9 +142,9 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
             {/* ═══ Sidebar: Filters ═══ */}
-            <div className="lg:col-span-1 space-y-5">
+            <div className="lg:col-span-1 space-y-6">
               {/* Search */}
               <div className="glass-card p-5">
                 <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>🔍 Tìm Kiếm</h3>
@@ -140,14 +162,42 @@ export default function DashboardPage() {
               {/* Category Filter */}
               <div className="glass-card p-5">
                 <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>🏷️ Danh Mục</h3>
-                <select className="input-dark"
-                  value={categoryFilter}
-                  onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}>
-                  <option value="">Tất cả</option>
-                  {categories.map((c, i) => (
-                    <option key={i} value={c.category}>{c.category} ({c.count})</option>
-                  ))}
-                </select>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => { setSelectedCategories([]); setPage(1); }}
+                    className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                    style={{
+                      background: selectedCategories.length === 0 ? "var(--accent-primary)" : "rgba(255,255,255,0.05)",
+                      color: selectedCategories.length === 0 ? "#fff" : "var(--text-muted)"
+                    }}
+                  >
+                    Tất cả
+                  </button>
+                  {STANDARD_CATEGORIES.map((cat, i) => {
+                    const isSelected = selectedCategories.includes(cat);
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedCategories(selectedCategories.filter(c => c !== cat));
+                          } else {
+                            setSelectedCategories([...selectedCategories, cat]);
+                          }
+                          setPage(1);
+                        }}
+                        className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                        style={{
+                          background: isSelected ? "var(--gradient-primary)" : "rgba(255,255,255,0.05)",
+                          color: isSelected ? "#fff" : "var(--text-muted)",
+                          border: isSelected ? "none" : "1px solid var(--border-color)"
+                        }}
+                      >
+                        {cat}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Sentiment Filter */}
@@ -258,7 +308,7 @@ export default function DashboardPage() {
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-2 mt-6">
+                <div className="flex items-center justify-center gap-1.5 mt-8">
                   <button
                     onClick={() => setPage(Math.max(1, page - 1))}
                     disabled={page === 1}
@@ -266,18 +316,11 @@ export default function DashboardPage() {
                   >
                     ← Trước
                   </button>
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let p;
-                    if (totalPages <= 5) {
-                      p = i + 1;
-                    } else if (page <= 3) {
-                      p = i + 1;
-                    } else if (page >= totalPages - 2) {
-                      p = totalPages - 4 + i;
-                    } else {
-                      p = page - 2 + i;
-                    }
-                    return (
+                  {getPaginationPages(page, totalPages).map((p, i) => (
+                    p === '...' ? (
+                      <span key={`dots-${i}`} className="w-9 h-9 flex items-center justify-center text-sm"
+                        style={{ color: "var(--text-muted)" }}>...</span>
+                    ) : (
                       <button
                         key={p}
                         onClick={() => setPage(p)}
@@ -290,8 +333,8 @@ export default function DashboardPage() {
                       >
                         {p}
                       </button>
-                    );
-                  })}
+                    )
+                  ))}
                   <button
                     onClick={() => setPage(Math.min(totalPages, page + 1))}
                     disabled={page === totalPages}

@@ -40,7 +40,7 @@ def init_db():
                     video_sentiment TEXT,
                     top_keywords TEXT,
                     viral_probability REAL DEFAULT 0,
-                    category TEXT,
+                    category TEXT[],
                     video_description TEXT,
                     ai_status VARCHAR(20) DEFAULT 'pending'
                 )
@@ -154,14 +154,19 @@ def update_ai_results(video_id, res):
                     category = %s, video_description = %s, top_keywords = %s,
                     video_sentiment = %s, positive_score = %s, views_per_hour = %s,
                     engagement_rate = %s, viral_velocity = %s, viral_probability = %s,
-                    ai_status = 'completed'
+                    ai_status = %s
                 WHERE video_id = %s
             '''
+            cat_str = res.get('category', '')
+            cat_list = [c.strip() for c in cat_str.split('|')] if cat_str else []
+            
+            ai_status = res.get('ai_status', 'completed')
+            
             cursor.execute(query, (
-                res.get('category'), res.get('video_description'), res.get('top_keywords'),
+                cat_list, res.get('video_description'), res.get('top_keywords'),
                 res.get('video_sentiment'), res.get('positive_score', 0), res.get('views_per_hour', 0),
                 res.get('engagement_rate', 0), res.get('viral_velocity', 0), res.get('viral_probability', 0),
-                video_id
+                ai_status, video_id
             ))
             conn.commit()
     except Exception as e:
@@ -193,18 +198,18 @@ def reset_all_analysis_status():
 # ==========================================
 
 def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
-                            category: str = None, sentiment: str = None,
+                            categories: list = None, sentiment: str = None,
                             search: str = None, sort_by: str = "viral_probability",
                             sort_order: str = "desc", min_viral: float = 0):
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            where_clauses = ["views > 0"]
+            where_clauses = ["views > 0", "ai_status = 'completed'"]
             params = []
 
-            if category:
-                where_clauses.append("category = %s")
-                params.append(category)
+            if categories:
+                where_clauses.append("category && %s::TEXT[]")
+                params.append(categories)
             if sentiment:
                 where_clauses.append("video_sentiment = %s")
                 params.append(sentiment)
@@ -255,7 +260,7 @@ def get_category_stats():
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT category, COUNT(*) as count, COALESCE(AVG(viral_velocity), 0) as avg_velocity, COALESCE(AVG(viral_probability), 0) as avg_viral, COALESCE(AVG(engagement_rate), 0) as avg_engagement, COALESCE(SUM(views), 0) as total_views FROM videos WHERE views > 0 AND category IS NOT NULL GROUP BY category ORDER BY avg_velocity DESC
+                SELECT unnest(category) as category, COUNT(*) as count, COALESCE(AVG(viral_velocity), 0) as avg_velocity, COALESCE(AVG(viral_probability), 0) as avg_viral, COALESCE(AVG(engagement_rate), 0) as avg_engagement, COALESCE(SUM(views), 0) as total_views FROM videos WHERE views > 0 AND category IS NOT NULL GROUP BY unnest(category) ORDER BY avg_velocity DESC
             """)
             return cur.fetchall()
     finally:

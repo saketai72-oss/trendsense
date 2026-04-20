@@ -7,15 +7,15 @@
 
 :root {
   /* Core palette */
-  --bg-primary: #0a0b1a;
-  --bg-secondary: #101225;
-  --bg-card: #151733;
-  --bg-card-hover: #1c1f42;
-  --bg-glass: rgba(21, 23, 51, 0.7);
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-card: #141414;
+  --bg-card-hover: #1f1f1f;
+  --bg-glass: rgba(20, 20, 20, 0.7);
 
   /* Accent colors */
-  --accent-primary: #7c3aed;
-  --accent-secondary: #a855f7;
+  --accent-primary: #dc2626; /* Main Red */
+  --accent-secondary: #ef4444; /* Bright Red */
   --accent-blue: #3b82f6;
   --accent-cyan: #06b6d4;
   --accent-pink: #ec4899;
@@ -24,25 +24,25 @@
   --accent-yellow: #f59e0b;
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%);
-  --gradient-hero: linear-gradient(135deg, #0a0b1a 0%, #1a1040 40%, #0a0b1a 100%);
-  --gradient-card: linear-gradient(135deg, #151733 0%, #1c1f42 100%);
-  --gradient-accent: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%);
-  --gradient-neon: linear-gradient(135deg, #06b6d4 0%, #7c3aed 50%, #ec4899 100%);
+  --gradient-primary: linear-gradient(135deg, #991b1b 0%, #ef4444 100%);
+  --gradient-hero: linear-gradient(135deg, #000000 0%, #1f0404 40%, #050505 100%);
+  --gradient-card: linear-gradient(135deg, #141414 0%, #1f1f1f 100%);
+  --gradient-accent: linear-gradient(135deg, #dc2626 0%, #f87171 100%);
+  --gradient-neon: linear-gradient(135deg, #000000 0%, #dc2626 50%, #fca5a5 100%);
 
   /* Text colors */
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
 
   /* Borders */
-  --border-color: rgba(124, 58, 237, 0.15);
-  --border-glow: rgba(124, 58, 237, 0.4);
+  --border-color: rgba(220, 38, 38, 0.2);
+  --border-glow: rgba(220, 38, 38, 0.5);
 
   /* Shadows */
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
-  --shadow-glow: 0 0 30px rgba(124, 58, 237, 0.15);
-  --shadow-neon: 0 0 20px rgba(124, 58, 237, 0.3);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 30px rgba(220, 38, 38, 0.2);
+  --shadow-neon: 0 0 20px rgba(220, 38, 38, 0.4);
 }
 
 /* ──── Base ──── */
@@ -123,6 +123,7 @@ main {
   mask-composite: exclude;
   opacity: 0;
   transition: opacity 0.3s;
+  pointer-events: none;
 }
 .neon-border:hover::before {
   opacity: 1;
@@ -183,11 +184,11 @@ main {
   border: none;
   cursor: pointer;
   transition: all 0.3s;
-  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+  box-shadow: 0 4px 15px rgba(220, 38, 38, 0.3);
 }
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 25px rgba(124, 58, 237, 0.5);
+  box-shadow: 0 6px 25px rgba(220, 38, 38, 0.5);
 }
 
 .btn-outline {
@@ -201,7 +202,7 @@ main {
   transition: all 0.3s;
 }
 .btn-outline:hover {
-  background: rgba(124, 58, 237, 0.1);
+  background: rgba(220, 38, 38, 0.1);
   box-shadow: var(--shadow-neon);
 }
 
@@ -223,9 +224,9 @@ main {
 }
 
 .badge-category {
-  background: rgba(124, 58, 237, 0.15);
-  color: #a78bfa;
-  border: 1px solid rgba(124, 58, 237, 0.3);
+  background: rgba(220, 38, 38, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(220, 38, 38, 0.3);
 }
 
 /* ──── Table ──── */
@@ -260,7 +261,7 @@ main {
 
 .data-table tbody td {
   padding: 0.875rem 1rem;
-  border-bottom: 1px solid rgba(124, 58, 237, 0.07);
+  border-bottom: 1px solid rgba(220, 38, 38, 0.07);
   font-size: 0.875rem;
 }
 
@@ -320,7 +321,7 @@ main {
 
 .input-dark:focus {
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
 }
 
 .input-dark::placeholder {
@@ -330,17 +331,17 @@ main {
 /* ──── Keyword Tag ──── */
 .keyword-tag {
   display: inline-block;
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.2), rgba(59, 130, 246, 0.2));
-  color: #c4b5fd;
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.2), rgba(59, 130, 246, 0.2));
+  color: #fca5a5;
   padding: 0.3rem 0.7rem;
   border-radius: 20px;
   font-size: 0.78rem;
   margin: 0.15rem;
-  border: 1px solid rgba(124, 58, 237, 0.2);
+  border: 1px solid rgba(220, 38, 38, 0.2);
   transition: all 0.2s;
 }
 
 .keyword-tag:hover {
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.4), rgba(59, 130, 246, 0.4));
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.4), rgba(59, 130, 246, 0.4));
   border-color: var(--accent-primary);
 }

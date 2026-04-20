@@ -216,7 +216,7 @@ def _run_whisper(video_path):
         sub.close()
 
         model = _get_whisper()
-        segments, _ = model.transcribe(mp3_path, beam_size=5)
+        segments, _ = model.transcribe(mp3_path, beam_size=2)
         text = " ".join(seg.text for seg in segments).strip()
         return text if text else "Không nghe được tiếng."
 
@@ -377,6 +377,7 @@ Lưu ý:
         "sentiment": "🟡 TRUNG LẬP",
         "positive_score": 50.0,
         "keywords": [],
+        "ai_status": "error",
     }
 
 
@@ -436,7 +437,7 @@ def _update_supabase(video_id, results):
                 WHERE video_id = %s
                 """,
                 (
-                    results.get("category", "🌍 Khác"),
+                    [results.get("category", "🎭 Giải trí")] if results.get("category") != "🌍 Khác" else [],
                     results.get("video_description", ""),
                     results.get("top_keywords", ""),
                     results.get("video_sentiment", "🟡 TRUNG LẬP"),
@@ -453,6 +454,22 @@ def _update_supabase(video_id, results):
         print(f"    [✓] Đã cập nhật Supabase: {video_id}")
     except Exception as e:
         print(f"    [!] Supabase error: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def _update_status(video_id, status):
+    """Cập nhật ai_status nhanh chóng để Supabase Realtime bắn event về Frontend."""
+    import psycopg2
+    db_url = os.environ["DATABASE_URL"]
+    conn = psycopg2.connect(db_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE videos SET ai_status = %s WHERE video_id = %s", (status, video_id))
+        conn.commit()
+    except Exception as e:
+        print(f"    [!] Status update error: {e}")
         conn.rollback()
     finally:
         conn.close()
@@ -483,6 +500,7 @@ def process_video(video_data: dict):
 
     # ── BƯỚC 1: Tải video từ TikTok vào /tmp ──
     print("  [1/5] 📥 Downloading video...")
+    _update_status(video_id, "downloading")
     video_path = _download_video(url, video_id)
 
     if not video_path:
@@ -502,7 +520,8 @@ def process_video(video_data: dict):
     try:
         # ── BƯỚC 2: Trích xuất frames ──
         print("  [2/5] 🖼️ Extracting frames...")
-        pil_frames, cv2_frames = _extract_frames(video_path)
+        _update_status(video_id, "analyzing")
+        pil_frames, cv2_frames = _extract_frames(video_path, total_frames=4, ocr_frames=1)
 
         # ── BƯỚC 3: Chạy 3 AI models đa phương thức ──
         print("  [3/5] 🎧 Running Whisper (Audio → Text)...")
@@ -519,6 +538,7 @@ def process_video(video_data: dict):
 
         # ── BƯỚC 4: Groq tổng hợp tất cả (1 lệnh thay 3 model) ──
         print("  [4/5] 🧠 Calling Groq AI (Summarize + Categorize + Sentiment)...")
+        _update_status(video_id, "summarizing")
         groq_result = _call_groq(
             audio_text, ocr_text, blip_text, caption,
             video_data.get("top_comments", []),
@@ -538,7 +558,7 @@ def process_video(video_data: dict):
             "engagement_rate": metrics["er"],
             "viral_velocity": metrics["velocity"],
             "viral_probability": 0.0,  # Sẽ được tính bởi weekly_train workflow
-            "ai_status": "completed",
+            "ai_status": groq_result.get("ai_status", "completed"),
         }
 
         _update_supabase(video_id, final)

@@ -74,9 +74,11 @@ export default function VideoDetailPage() {
                       </p>
                     )}
                     <div className="flex items-center gap-3 mt-3 flex-wrap">
-                      {(video.category || "—").split("|").map((cat, ci) => (
+                      {Array.isArray(video.category) ? video.category.map((cat, ci) => (
+                        <span key={ci} className="badge badge-category">{cat}</span>
+                      )) : (typeof video.category === "string" ? video.category.split("|").map((cat, ci) => (
                         <span key={ci} className="badge badge-category">{cat.trim()}</span>
-                      ))}
+                      )) : <span className="badge badge-category">—</span>)}
                       <span className="badge" style={{
                         background: video.video_sentiment?.includes("TÍCH CỰC") ? "rgba(16,185,129,0.15)" :
                           video.video_sentiment?.includes("TIÊU CỰC") ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",

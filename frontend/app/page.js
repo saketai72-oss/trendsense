@@ -62,14 +62,14 @@ export default function HomePage() {
             background: "var(--accent-pink)", animationDelay: "5s",
           }} />
 
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-20 relative z-10">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-28 relative z-10">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-12 items-center">
               {/* Left — Copy */}
-              <div>
+              <div className="md:col-start-3 md:col-span-5">
                 <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold mb-6"
                   style={{
-                    background: "rgba(124, 58, 237, 0.15)",
-                    border: "1px solid rgba(124, 58, 237, 0.3)",
+                    background: "rgba(220, 38, 38, 0.15)",
+                    border: "1px solid rgba(220, 38, 38, 0.3)",
                     color: "var(--accent-secondary)",
                   }}>
                   🤖 Powered by Multimodal AI
@@ -110,7 +110,7 @@ export default function HomePage() {
               </div>
 
               {/* Right — Floating Stats Preview */}
-              <div className="relative hidden lg:block">
+              <div className="relative hidden md:block md:col-span-4">
                 <div className="animate-float">
                   <div className="glass-card p-6 mb-4"
                     style={{ background: "rgba(21, 23, 51, 0.9)" }}>
@@ -171,7 +171,7 @@ export default function HomePage() {
         </section>
 
         {/* ═══════ HOW IT WORKS ═══════ */}
-        <section className="py-20" style={{ background: "var(--bg-secondary)" }}>
+        <section className="py-28" style={{ background: "var(--bg-secondary)" }}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-14">
               <span className="text-xs font-semibold tracking-widest uppercase"
@@ -221,7 +221,7 @@ export default function HomePage() {
 
         {/* ═══════ STATS OVERVIEW ═══════ */}
         {stats && (
-          <section className="py-16">
+          <section className="py-24">
             <div className="max-w-7xl mx-auto px-4 sm:px-6">
               <div className="text-center mb-10">
                 <h2 className="text-3xl font-bold">Tổng Quan <span className="gradient-text">Hệ Thống</span></h2>
@@ -239,7 +239,7 @@ export default function HomePage() {
         )}
 
         {/* ═══════ MARKET TREND LIVE STREAM (Video Table) ═══════ */}
-        <section className="py-16" style={{ background: "var(--bg-secondary)" }}>
+        <section className="py-24" style={{ background: "var(--bg-secondary)" }}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
               <div>
@@ -268,7 +268,7 @@ export default function HomePage() {
 
         {/* ═══════ CATEGORY RANKING ═══════ */}
         {categories.length > 0 && (
-          <section className="py-16">
+          <section className="py-24">
             <div className="max-w-7xl mx-auto px-4 sm:px-6">
               <div className="text-center mb-10">
                 <span className="text-xs font-semibold tracking-widest uppercase"
@@ -314,8 +314,8 @@ export default function HomePage() {
         )}
 
         {/* ═══════ CTA SECTION ═══════ */}
-        <section className="py-20 relative overflow-hidden"
-          style={{ background: "linear-gradient(135deg, #1a1040 0%, #0a0b1a 100%)" }}>
+        <section className="py-28 relative overflow-hidden"
+          style={{ background: "linear-gradient(135deg, #1a0505 0%, #000000 100%)" }}>
           <div className="bg-orb" style={{
             width: "400px", height: "400px", top: "-100px", left: "50%",
             background: "var(--accent-primary)", transform: "translateX(-50%)",

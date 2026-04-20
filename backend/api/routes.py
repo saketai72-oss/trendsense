@@ -33,10 +33,11 @@ def list_videos(
     sort_order: str = "desc",
     min_viral: float = 0,
 ):
-    """Lấy danh sách video với phân trang, lọc, và sắp xếp."""
+    cat_list = [c.strip() for c in category.split(',')] if category else None
+
     rows, total = get_all_analyzed_videos(
         page=page, per_page=per_page,
-        category=category, sentiment=sentiment,
+        categories=cat_list, sentiment=sentiment,
         search=search, sort_by=sort_by,
         sort_order=sort_order, min_viral=min_viral,
     )

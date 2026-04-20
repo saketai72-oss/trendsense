@@ -3,47 +3,107 @@ import { useState, useEffect, useRef } from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import { analyzeVideo, checkAnalysis } from "../lib/api";
+import { supabase } from "../lib/supabase";
+
+const STEPS = [
+  { key: "user_pending", icon: "📋", label: "Đã tiếp nhận yêu cầu" },
+  { key: "downloading", icon: "📥", label: "Đang tải video từ TikTok..." },
+  { key: "analyzing", icon: "🔬", label: "AI đang phân tích đa phương thức..." },
+  { key: "summarizing", icon: "🧠", label: "Groq AI đang tổng hợp & dự đoán..." },
+  { key: "completed", icon: "✅", label: "Hoàn tất!" },
+];
+
+function getStepIndex(status) {
+  const idx = STEPS.findIndex((s) => s.key === status);
+  return idx >= 0 ? idx : 0;
+}
 
 export default function AnalyzePage() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [videoId, setVideoId] = useState(null);
+  const [tiktokUrl, setTiktokUrl] = useState("");
   const [result, setResult] = useState(null);
-  const [polling, setPolling] = useState(false);
-  const intervalRef = useRef(null);
+  const [currentStep, setCurrentStep] = useState(0);
+  const channelRef = useRef(null);
+  const fallbackRef = useRef(null);
 
-  // Poll for results after submission
+  // Supabase Realtime subscription
   useEffect(() => {
-    if (!videoId || !polling) return;
+    if (!videoId || result) return;
 
-    intervalRef.current = setInterval(async () => {
+    // Try Supabase Realtime first
+    if (supabase) {
+      const channel = supabase
+        .channel(`video-status-${videoId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "videos",
+            filter: `video_id=eq.${videoId}`,
+          },
+          (payload) => {
+            const newStatus = payload.new?.ai_status;
+            if (!newStatus) return;
+
+            const idx = getStepIndex(newStatus);
+            setCurrentStep(idx);
+
+            if (newStatus === "completed" || newStatus === "error") {
+              // Fetch full result
+              checkAnalysis(videoId).then((data) => {
+                setResult(data);
+                setLoading(false);
+              });
+              channel.unsubscribe();
+            }
+          }
+        )
+        .subscribe();
+
+      channelRef.current = channel;
+    }
+
+    // Fallback polling (in case Supabase Realtime is not configured)
+    fallbackRef.current = setInterval(async () => {
       try {
         const data = await checkAnalysis(videoId);
-        if (data.is_done || data.status === "completed" || data.status === "error") {
+        const status = data?.status || data?.video?.ai_status;
+        if (status) {
+          setCurrentStep(getStepIndex(status));
+        }
+        if (data.is_done || status === "completed" || status === "error") {
           setResult(data);
-          setPolling(false);
           setLoading(false);
-          clearInterval(intervalRef.current);
+          clearInterval(fallbackRef.current);
+          if (channelRef.current) channelRef.current.unsubscribe();
         }
       } catch {
         // Keep polling
       }
-    }, 5000);
+    }, 8000);
 
-    return () => clearInterval(intervalRef.current);
-  }, [videoId, polling]);
+    return () => {
+      if (channelRef.current) channelRef.current.unsubscribe();
+      if (fallbackRef.current) clearInterval(fallbackRef.current);
+    };
+  }, [videoId, result]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setResult(null);
+    setCurrentStep(0);
     setLoading(true);
+    setTiktokUrl(url.trim());
 
     try {
       const resp = await analyzeVideo(url.trim());
       setVideoId(resp.video_id);
-      setPolling(true);
+      setCurrentStep(1);
     } catch (err) {
       setError(err.message || "Đã có lỗi xảy ra");
       setLoading(false);
@@ -59,12 +119,13 @@ export default function AnalyzePage() {
 
   const video = result?.video;
   const recommendations = result?.recommendations;
+  const progressPct = Math.min(((currentStep + 1) / STEPS.length) * 100, 100);
 
   return (
     <>
       <Navbar />
       <main className="pb-10 min-h-screen w-full">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 w-full">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 w-full">
           {/* Header */}
           <div className="text-center mb-10 mt-8">
             <span className="text-xs font-semibold tracking-widest uppercase"
@@ -110,37 +171,106 @@ export default function AnalyzePage() {
                       <path className="opacity-75" fill="currentColor"
                         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
-                    AI đang phân tích... (1-3 phút)
+                    AI đang xử lý...
                   </span>
                 ) : (
                   "🎯 Phân Tích & Dự Báo"
                 )}
               </button>
             </form>
-
-            {/* Processing steps */}
-            {loading && (
-              <div className="mt-6 space-y-3">
-                {[
-                  { icon: "📥", text: "Đang tải video từ TikTok..." },
-                  { icon: "🎧", text: "Whisper đang bóc âm thanh..." },
-                  { icon: "👁️", text: "BLIP đang phân tích hình ảnh..." },
-                  { icon: "📝", text: "EasyOCR đang đọc chữ trên video..." },
-                  { icon: "🧠", text: "Groq AI đang tổng hợp & dự đoán..." },
-                ].map((step, i) => (
-                  <div key={i} className="flex items-center gap-3 text-sm opacity-0 animate-fadeInUp"
-                    style={{
-                      color: "var(--text-secondary)",
-                      animationDelay: `${i * 600}ms`,
-                      animationFillMode: "forwards",
-                    }}>
-                    <span className="text-lg">{step.icon}</span>
-                    {step.text}
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
+
+          {/* ═══ PROCESSING: Video Preview + Progress ═══ */}
+          {loading && videoId && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 animate-fadeInUp" style={{ animationFillMode: "forwards" }}>
+              {/* TikTok Embed */}
+              <div className="glass-card p-5">
+                <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>
+                  🎬 Video Đang Phân Tích
+                </h3>
+                <div className="rounded-xl overflow-hidden" style={{ background: "#000", aspectRatio: "9/16", maxHeight: "480px" }}>
+                  <iframe
+                    src={`https://www.tiktok.com/embed/v2/${videoId}`}
+                    style={{ width: "100%", height: "100%", border: "none" }}
+                    allow="encrypted-media"
+                    allowFullScreen
+                  />
+                </div>
+              </div>
+
+              {/* Progress Steps */}
+              <div className="glass-card p-5">
+                <h3 className="text-sm font-semibold mb-4" style={{ color: "var(--text-secondary)" }}>
+                  ⏳ Tiến Độ Xử Lý
+                </h3>
+
+                {/* Progress bar */}
+                <div className="w-full h-3 rounded-full mb-6" style={{ background: "rgba(255,255,255,0.05)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{
+                      width: `${progressPct}%`,
+                      background: "var(--gradient-primary)",
+                      boxShadow: "0 0 12px rgba(220, 38, 38, 0.4)",
+                    }}
+                  />
+                </div>
+                <div className="text-center text-sm font-semibold mb-6" style={{ color: "var(--accent-primary)" }}>
+                  {Math.round(progressPct)}%
+                </div>
+
+                {/* Step list */}
+                <div className="space-y-4">
+                  {STEPS.map((step, i) => {
+                    const isDone = i < currentStep;
+                    const isActive = i === currentStep;
+                    return (
+                      <div key={step.key} className="flex items-center gap-3">
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-sm flex-shrink-0 transition-all duration-300"
+                          style={{
+                            background: isDone
+                              ? "var(--accent-green)"
+                              : isActive
+                              ? "var(--gradient-primary)"
+                              : "rgba(255,255,255,0.05)",
+                            color: isDone || isActive ? "#fff" : "var(--text-muted)",
+                            boxShadow: isActive ? "0 0 15px rgba(220,38,38,0.4)" : "none",
+                          }}
+                        >
+                          {isDone ? "✓" : step.icon}
+                        </div>
+                        <span
+                          className="text-sm font-medium transition-colors duration-300"
+                          style={{
+                            color: isDone
+                              ? "var(--accent-green)"
+                              : isActive
+                              ? "var(--text-primary)"
+                              : "var(--text-muted)",
+                          }}
+                        >
+                          {step.label}
+                        </span>
+                        {isActive && (
+                          <svg className="animate-spin w-4 h-4 ml-auto" viewBox="0 0 24 24"
+                            style={{ color: "var(--accent-primary)" }}>
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <p className="text-xs mt-6 text-center" style={{ color: "var(--text-muted)" }}>
+                  💡 Bạn có thể xem video bên cạnh trong lúc chờ AI xử lý.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* ═══ RESULTS ═══ */}
           {result && video && (
@@ -188,34 +318,53 @@ export default function AnalyzePage() {
                 </div>
               </div>
 
-              {/* 2. Video Description */}
-              {video.video_description && (
-                <div className="glass-card p-6">
-                  <h3 className="text-lg font-bold mb-3">📝 Mô Tả Video</h3>
-                  <p style={{ color: "var(--text-secondary)" }}>{video.video_description}</p>
-                  <div className="flex items-center gap-3 mt-4 flex-wrap">
-                    {(video.category || "—").split("|").map((cat, ci) => (
-                      <span key={ci} className="badge badge-category">{cat.trim()}</span>
-                    ))}
-                    <span className="badge" style={{
-                      background: video.video_sentiment?.includes("TÍCH CỰC") ? "rgba(16,185,129,0.15)" :
-                        video.video_sentiment?.includes("TIÊU CỰC") ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
-                      color: video.video_sentiment?.includes("TÍCH CỰC") ? "var(--accent-green)" :
-                        video.video_sentiment?.includes("TIÊU CỰC") ? "var(--accent-red)" : "var(--accent-yellow)",
-                      border: "1px solid currentColor",
-                    }}>
-                      {video.video_sentiment || "—"}
-                    </span>
-                  </div>
-                  {video.top_keywords && (
-                    <div className="mt-4 flex flex-wrap gap-1">
-                      {video.top_keywords.split(",").map((kw, i) => (
-                        <span key={i} className="keyword-tag">{kw.trim()}</span>
-                      ))}
+              {/* 2. Video Description + Small embed */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {video.video_description && (
+                  <div className="glass-card p-6 md:col-span-2">
+                    <h3 className="text-lg font-bold mb-3">📝 Mô Tả Video</h3>
+                    <p style={{ color: "var(--text-secondary)" }}>{video.video_description}</p>
+                    <div className="flex items-center gap-3 mt-4 flex-wrap">
+                      {Array.isArray(video.category) ? video.category.map((cat, ci) => (
+                        <span key={ci} className="badge badge-category">{cat}</span>
+                      )) : (typeof video.category === "string" ? video.category.split("|").map((cat, ci) => (
+                        <span key={ci} className="badge badge-category">{cat.trim()}</span>
+                      )) : <span className="badge badge-category">—</span>)}
+                      <span className="badge" style={{
+                        background: video.video_sentiment?.includes("TÍCH CỰC") ? "rgba(16,185,129,0.15)" :
+                          video.video_sentiment?.includes("TIÊU CỰC") ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+                        color: video.video_sentiment?.includes("TÍCH CỰC") ? "var(--accent-green)" :
+                          video.video_sentiment?.includes("TIÊU CỰC") ? "var(--accent-red)" : "var(--accent-yellow)",
+                        border: "1px solid currentColor",
+                      }}>
+                        {video.video_sentiment || "—"}
+                      </span>
                     </div>
-                  )}
-                </div>
-              )}
+                    {video.top_keywords && (
+                      <div className="mt-4 flex flex-wrap gap-1">
+                        {video.top_keywords.split(",").map((kw, i) => (
+                          <span key={i} className="keyword-tag">{kw.trim()}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Small video embed in results */}
+                {tiktokUrl && (
+                  <div className="glass-card p-4">
+                    <h3 className="text-sm font-semibold mb-2" style={{ color: "var(--text-secondary)" }}>🎬 Video</h3>
+                    <div className="rounded-lg overflow-hidden" style={{ background: "#000", aspectRatio: "9/16", maxHeight: "360px" }}>
+                      <iframe
+                        src={`https://www.tiktok.com/embed/v2/${videoId}`}
+                        style={{ width: "100%", height: "100%", border: "none" }}
+                        allow="encrypted-media"
+                        allowFullScreen
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* 3. Recommendations */}
               {recommendations && (
