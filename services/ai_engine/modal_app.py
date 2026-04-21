@@ -280,18 +280,30 @@ def _call_groq(audio_text, ocr_text, blip_text, caption, top_comments):
     import time
     from groq import Groq
 
+    # Cắt gọn độ dài dữ liệu để tránh lỗi 400 (Vượt quá độ dài Context Window của LLM)
+    audio_t = str(audio_text)[:3000] if audio_text else ""
+    ocr_t = str(ocr_text)[:1500] if ocr_text else ""
+    blip_t = str(blip_text)[:1500] if blip_text else ""
+    cap_t = str(caption)[:500] if caption else ""
+
     categories_str = ", ".join(STANDARD_CATEGORIES)
-    comments_str = "\n".join(
-        [f"  - {c.get('text', '')}" for c in (top_comments or []) if c.get("text")]
-    ) or "Không có bình luận."
+    
+    # Chỉ lấy tối đa 15 comments đầu tiên và cắt bớt ký tự nếu quá dài
+    safe_comments = []
+    for c in (top_comments or [])[:15]:
+        text = c.get('text', '')
+        if text:
+            safe_comments.append(f"  - {str(text)[:200]}")
+    comments_str = "\n".join(safe_comments) or "Không có bình luận."
+
 
     prompt = f"""Bạn là trợ lý AI phân tích video TikTok Việt Nam.
 
 DỮ LIỆU TRÍCH XUẤT TỪ VIDEO:
-1. Âm thanh (Transcript): {audio_text}
-2. Chữ trên màn hình (OCR): {ocr_text}
-3. Bối cảnh hình ảnh (Vision): {blip_text}
-4. Tiêu đề gốc: {caption}
+1. Âm thanh (Transcript): {audio_t}
+2. Chữ trên màn hình (OCR): {ocr_t}
+3. Bối cảnh hình ảnh (Vision): {blip_t}
+4. Tiêu đề gốc: {cap_t}
 5. Top bình luận:
 {comments_str}
 
@@ -311,10 +323,16 @@ Lưu ý:
 
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
-    for attempt in range(3):
+    # Danh sách model theo thứ tự ưu tiên. Nếu Llama 70B hết quota, fallback sang 8B
+    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
+
+    for attempt in range(5): # Tăng lên 5 lần thử
         try:
+            # Chọn model: 2 lần đầu dùng 70b, sau đó fallback sang 8b
+            current_model = models[0] if attempt < 2 else (models[1] if attempt < 4 else models[2])
+            
             response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=current_model,
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0.3,
@@ -362,10 +380,15 @@ Lưu ý:
 
         except Exception as e:
             err_str = str(e).lower()
-            if ("rate_limit" in err_str or "429" in err_str) and attempt < 2:
-                wait = 2 ** (attempt + 1)  # 2s, 4s
-                print(f"    ⏳ Groq Rate Limit → chờ {wait}s (retry {attempt + 1}/3)...")
+            if ("rate_limit" in err_str or "429" in err_str) and attempt < 4:
+                import random
+                wait = 10 + (attempt * 6) + random.uniform(1, 4)  # Đợi 11-14s, 17-20s, 23-26s...
+                print(f"    ⏳ Groq Rate Limit (429) → chờ {wait:.1f}s (retry {attempt + 1}/5, next model: {models[0] if attempt + 1 < 2 else models[1]})...")
                 time.sleep(wait)
+            elif "400" in err_str or "context_length" in err_str:
+                print(f"    [!] Groq 400 Bad Request (có thể do text quá dài): {str(e)[:120]}")
+                # Nếu text vẫn quá dài, rút gọn thêm nữa cho lần retry sau
+                prompt = prompt[:len(prompt)//2] + "\n\n... (Dữ liệu đã bị cắt bớt do quá dài) ... BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON"
             else:
                 print(f"    [!] Groq error: {str(e)[:120]}")
                 break
@@ -484,6 +507,7 @@ def _update_status(video_id, status):
     secrets=[modal.Secret.from_name("trendsense-secrets")],
     volumes={MODEL_DIR: model_volume},
     timeout=600,
+    max_containers=3,  # Giới hạn 3 container tải video/chạy AI cùng lúc để tránh rate limit của Groq
 )
 def process_video(video_data: dict):
     """
