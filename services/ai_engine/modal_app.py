@@ -460,7 +460,7 @@ def _update_supabase(video_id, results):
                 WHERE video_id = %s
                 """,
                 (
-                    [results.get("category", "🎭 Giải trí")] if results.get("category") != "🌍 Khác" else [],
+                    [results.get("category")] if results.get("category") not in ["🌍 Khác", "Lỗi"] else [],
                     results.get("video_description", ""),
                     results.get("top_keywords", ""),
                     results.get("video_sentiment", "🟡 TRUNG LẬP"),
@@ -567,6 +567,21 @@ def process_video(video_data: dict):
             audio_text, ocr_text, blip_text, caption,
             video_data.get("top_comments", []),
         )
+
+        # PHÂN TÍCH LẠI: Nếu AI trả về "🌍 Khác" (không khớp danh mục), thử gọi lại lần 2
+        if groq_result.get("category") == "🌍 Khác" and groq_result.get("ai_status", "completed") != "error":
+            print("    ⚠️ AI trả về danh mục '🌍 Khác'. Đang tiến hành phân tích lại lần nữa...")
+            # Thêm một chút thay đổi vào prompt để ép AI phải chọn
+            groq_result = _call_groq(
+                audio_text, ocr_text, blip_text, caption + " (Vui lòng PHÂN TÍCH KỸ và CHỌN 1 TRONG CÁC DANH MỤC ĐÃ CHO, KHÔNG ĐƯỢC BỎ QUA)",
+                video_data.get("top_comments", []),
+            )
+            
+            # Nếu phân tích lại vẫn là "🌍 Khác" -> Đánh dấu là lỗi luôn
+            if groq_result.get("category") == "🌍 Khác":
+                print("    [!] Vẫn không thể phân loại. Đánh dấu video này là LỖI.")
+                groq_result["ai_status"] = "error"
+                groq_result["category"] = "Lỗi"
 
         # ── BƯỚC 5: Tính metrics + Ghi Supabase ──
         print("  [5/5] 📊 Computing metrics & writing to Supabase...")
