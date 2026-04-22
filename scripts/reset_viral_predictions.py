@@ -35,8 +35,7 @@ def reset_old_viral_videos():
             # Consistent with prediction_engine.py logic (create_time based)
             query = """
                 UPDATE videos 
-                SET viral_probability = 0, 
-                    viral_velocity = 0
+                SET viral_probability = 0
                 WHERE create_time > 0 
                   AND create_time < %s 
                   AND viral_probability > 0
