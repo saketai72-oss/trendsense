@@ -1,0 +1,29 @@
+name: Weekly Viral Status Reset
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Chạy vào lúc 00:00 Chủ Nhật hàng tuần
+  workflow_dispatch: # Cho phép chạy thủ công từ giao diện GitHub Actions
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary python-dotenv
+
+      - name: Run viral status reset script
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/reset_viral_predictions.py
