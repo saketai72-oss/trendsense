@@ -106,6 +106,33 @@ def main():
         # Bóc tách các chỉ số cơ bản
         stats = extract_basic_stats(driver.page_source)
 
+        # === KIỂM TRA DỮ LIỆU HỢP LỆ (Chống data rác làm hỏng model) ===
+        views = stats.get('Views', 0)
+        likes = stats.get('Likes', 0)
+        comments_count = stats.get('Comments', 0)
+        shares = stats.get('Shares', 0)
+        saves = stats.get('Saves', 0)
+
+        print(f"  [📊] Stats: 👁️{views:,} | ❤️{likes:,} | 💬{comments_count:,} | 🔗{shares:,} | 📌{saves:,}")
+
+        if views <= 0:
+            print(f"  [✂️] Bỏ qua: Views = 0 (video bị ẩn hoặc lỗi parse).")
+            continue
+
+        if likes > views:
+            print(f"  [✂️] Bỏ qua: Likes ({likes:,}) > Views ({views:,}) — Dữ liệu bất thường.")
+            video_id = extract_video_id(link)
+            if video_id:
+                mark_as_scraped(video_id)
+            continue
+
+        if comments_count > views:
+            print(f"  [✂️] Bỏ qua: Comments ({comments_count:,}) > Views ({views:,}) — Dữ liệu bất thường.")
+            video_id = extract_video_id(link)
+            if video_id:
+                mark_as_scraped(video_id)
+            continue
+
         # === BỘ LỌC NGÔN NGỮ (TRƯỚC KHI CÀO COMMENTS — TIẾT KIỆM THỜI GIAN) ===
         caption_text = stats.get('Caption', '').strip()
         if caption_text:

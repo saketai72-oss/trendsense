@@ -1,29 +1,32 @@
-name: Weekly Viral Status Reset
+name: 🧹 Weekly Viral Status Reset (Chủ Nhật)
 
+# Duyệt qua các video đã quá 2 tuần → reset viral_probability = 0
 on:
   schedule:
-    - cron: '0 0 * * 0' # Chạy vào lúc 00:00 Chủ Nhật hàng tuần
-  workflow_dispatch: # Cho phép chạy thủ công từ giao diện GitHub Actions
+    - cron: '0 18 * * 0' # 18:00 UTC = 01:00 ICT Chủ Nhật
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
-    
+
     steps:
-      - name: Checkout repository
+      - name: 📥 Kéo code từ repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 🐍 Cài đặt Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install dependencies
-        run: |
-          pip install psycopg2-binary python-dotenv
+      - name: 📦 Cài đặt thư viện
+        run: pip install psycopg2-binary python-dotenv
 
-      - name: Run viral status reset script
+      - name: 🧹 Reset viral status cho video cũ
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python scripts/reset_viral_predictions.py
