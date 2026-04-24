@@ -42,9 +42,11 @@ def init_db():
                     viral_probability REAL DEFAULT 0,
                     category TEXT[],
                     video_description TEXT,
-                    ai_status VARCHAR(20) DEFAULT 'pending'
+                    ai_status VARCHAR(20) DEFAULT 'pending',
+                    is_rescraped BOOLEAN DEFAULT FALSE
                 )
             ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_is_rescraped ON videos(is_rescraped)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ai_status ON videos(ai_status)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON videos(category)')
@@ -99,6 +101,158 @@ def insert_video_metadata(video_id, data_dict):
             conn.commit()
             return True
     except Exception as e:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def delete_video(video_id):
+    """Xóa video khỏi DB và history khi link chết hoặc rác"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM videos WHERE video_id = %s", (video_id,))
+            cursor.execute("DELETE FROM history WHERE video_id = %s", (video_id,))
+            conn.commit()
+            print(f"  [🗑️] Đã xóa video {video_id} khỏi database.")
+            return True
+    except Exception as e:
+        print(f"[ERROR] Failed to delete video {video_id}: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def get_all_video_links():
+    """Lấy toàn bộ link video và bình luận hiện có để phục vụ detect language fallback"""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT video_id, link, caption, 
+                       top1_cmt, top2_cmt, top3_cmt, top4_cmt, top5_cmt 
+                FROM videos 
+                ORDER BY scrape_date DESC
+            """)
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+def update_rescraped_stats_only(video_id, data_dict):
+    """
+    Chỉ cập nhật stats cơ bản, giữ nguyên bình luận cũ.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            query = '''
+                UPDATE videos SET
+                    caption = %s, views = %s, likes = %s, comments = %s,
+                    shares = %s, saves = %s, create_time = %s,
+                    scrape_date = %s, is_rescraped = TRUE
+                WHERE video_id = %s
+            '''
+            cursor.execute(query, (
+                data_dict.get('caption', ''),
+                int(data_dict.get('views', 0)),
+                int(data_dict.get('likes', 0)),
+                int(data_dict.get('comments', 0)),
+                int(data_dict.get('shares', 0)),
+                int(data_dict.get('saves', 0)),
+                int(data_dict.get('create_time', 0)),
+                data_dict.get('scrape_date', datetime.now().date().isoformat()),
+                video_id
+            ))
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"[ERROR] Failed to update stats for {video_id}: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def update_rescraped_metadata(video_id, data_dict):
+    """
+    Cập nhật data sau khi cào lại, đánh dấu is_rescraped = True
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            query = '''
+                UPDATE videos SET
+                    caption = %s, views = %s, likes = %s, comments = %s,
+                    shares = %s, saves = %s, create_time = %s,
+                    scrape_date = %s, is_rescraped = TRUE,
+                    top1_cmt = %s, top1_likes = %s,
+                    top2_cmt = %s, top2_likes = %s,
+                    top3_cmt = %s, top3_likes = %s,
+                    top4_cmt = %s, top4_likes = %s,
+                    top5_cmt = %s, top5_likes = %s
+                WHERE video_id = %s
+            '''
+            cursor.execute(query, (
+                data_dict.get('caption', ''),
+                int(data_dict.get('views', 0)),
+                int(data_dict.get('likes', 0)),
+                int(data_dict.get('comments', 0)),
+                int(data_dict.get('shares', 0)),
+                int(data_dict.get('saves', 0)),
+                int(data_dict.get('create_time', 0)),
+                data_dict.get('scrape_date', datetime.now().date().isoformat()),
+                data_dict.get('top1_cmt', ''), int(data_dict.get('top1_likes', 0)),
+                data_dict.get('top2_cmt', ''), int(data_dict.get('top2_likes', 0)),
+                data_dict.get('top3_cmt', ''), int(data_dict.get('top3_likes', 0)),
+                data_dict.get('top4_cmt', ''), int(data_dict.get('top4_likes', 0)),
+                data_dict.get('top5_cmt', ''), int(data_dict.get('top5_likes', 0)),
+                video_id
+            ))
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"[ERROR] Failed to update rescraped video {video_id}: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def get_high_potential_videos(threshold=40.0):
+    """Lấy danh sách video có tiềm năng viral cao (> threshold)"""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT * FROM videos 
+                WHERE viral_probability > %s OR engagement_rate > %s
+                ORDER BY viral_probability DESC
+            """, (threshold, threshold))
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+def update_viral_metrics_only(video_id, res):
+    """
+    Chỉ cập nhật các chỉ số toán học và sentiment, giữ nguyên category và description.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            query = '''
+                UPDATE videos SET
+                    video_sentiment = %s, positive_score = %s, views_per_hour = %s,
+                    engagement_rate = %s, viral_velocity = %s, viral_probability = %s,
+                    ai_status = 'completed'
+                WHERE video_id = %s
+            '''
+            cursor.execute(query, (
+                res.get('video_sentiment'), res.get('positive_score', 0), res.get('views_per_hour', 0),
+                res.get('engagement_rate', 0), res.get('viral_velocity', 0), res.get('viral_probability', 0),
+                video_id
+            ))
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"[ERROR] Failed to update viral metrics for {video_id}: {e}")
         conn.rollback()
         return False
     finally:
