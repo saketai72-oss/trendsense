@@ -1,7 +1,7 @@
 {
-  "training_samples": 687,
+  "training_samples": 2010,
   "window_days": 14,
-  "accuracy": 0.9565,
-  "trained_at": "2026-04-19T18:14:27.522419",
+  "accuracy": 0.9502,
+  "trained_at": "2026-04-26T18:09:47.354758",
   "model_file": "rf_model.joblib"
 }
