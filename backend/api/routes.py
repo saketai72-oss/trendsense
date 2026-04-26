@@ -2,11 +2,13 @@
 TrendSense API — Video Routes
 All endpoints for video data, stats, and analysis.
 """
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 import math
 import re
+import hashlib
+import base64
 
 from core.db.models import (
     get_all_analyzed_videos, get_video_by_id,
@@ -160,49 +162,50 @@ def timeline():
 
 
 # ──────────────────────────────────────────────────
-# POST /api/analyze — User Video Prediction
+# POST /api/analyze — User Video Prediction (Upload)
 # ──────────────────────────────────────────────────
-class AnalyzeRequest(BaseModel):
-    url: str
+MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
 @router.post("/analyze")
-def analyze_video(req: AnalyzeRequest):
+async def analyze_video(
+    video: UploadFile = File(...),
+    caption: str = Form(""),
+):
     """
-    Nhận URL TikTok từ người dùng, gửi tới Modal API để phân tích on-demand.
+    Nhận video upload + caption từ người dùng.
+    Encode base64 rồi gửi tới Modal API để phân tích on-demand.
     Trả về status & video_id ngay lập tức.
     """
     import requests
     from core.config.backend_settings import MODAL_WEBHOOK_URL
 
-    url = req.url.strip()
+    # Validate file type
+    allowed_types = {"video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/x-matroska"}
+    if video.content_type and video.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Định dạng video không hỗ trợ: {video.content_type}. Chấp nhận: MP4, MOV, AVI, WebM, MKV."
+        )
 
-    # Validate TikTok URL
-    if not re.match(r"https?://(www\.|vm\.)?tiktok\.com/", url):
-        raise HTTPException(status_code=400, detail="URL TikTok không hợp lệ")
+    # Read video bytes
+    video_bytes = await video.read()
 
-    # Extract video_id from URL
-    video_id = None
-    match = re.search(r"/video/(\d+)", url)
-    if match:
-        video_id = match.group(1)
-    else:
-        # Short URL — try to resolve
-        try:
-            resp = requests.head(url, allow_redirects=True, timeout=10)
-            match = re.search(r"/video/(\d+)", resp.url)
-            if match:
-                video_id = match.group(1)
-                url = resp.url
-        except Exception:
-            pass
+    if len(video_bytes) == 0:
+        raise HTTPException(status_code=400, detail="File video trống.")
 
-    if not video_id:
-        raise HTTPException(status_code=400, detail="Không thể trích xuất Video ID từ URL")
+    if len(video_bytes) > MAX_VIDEO_SIZE:
+        raise HTTPException(status_code=400, detail=f"Video quá lớn. Tối đa {MAX_VIDEO_SIZE // (1024*1024)} MB.")
+
+    # Generate unique video_id from file hash
+    file_hash = hashlib.sha256(video_bytes).hexdigest()[:16]
+    video_id = f"upload_{file_hash}"
+
+    caption_text = caption.strip()
 
     # Insert into DB as user_pending
     try:
-        insert_user_video(video_id, url)
+        insert_user_video(video_id, f"upload://{video_id}")
     except Exception:
         pass  # May already exist
 
@@ -210,17 +213,22 @@ def analyze_video(req: AnalyzeRequest):
     if not MODAL_WEBHOOK_URL:
         raise HTTPException(status_code=503, detail="Modal webhook chưa được cấu hình")
 
+    # Encode video as base64 for transmission to Modal
+    video_b64 = base64.b64encode(video_bytes).decode("utf-8")
+
     payload = {
         "video_id": video_id,
-        "url": url,
-        "caption": "",
+        "url": "",
+        "caption": caption_text,
+        "video_base64": video_b64,
+        "video_filename": video.filename or "upload.mp4",
         "views": 0, "likes": 0, "comments": 0,
         "shares": 0, "saves": 0, "create_time": 0,
         "top_comments": [],
     }
 
     try:
-        resp = requests.post(MODAL_WEBHOOK_URL, json=payload, timeout=30)
+        resp = requests.post(MODAL_WEBHOOK_URL, json=payload, timeout=120)
         resp.raise_for_status()
         return {
             "status": "queued",
@@ -253,15 +261,31 @@ def check_analysis(video_id: str):
     status = result.get("ai_status", "pending")
     is_done = status == "completed"
 
+    is_upload = video_id.startswith("upload_")
+    analysis_type = "content_based" if is_upload else "engagement_based"
+
+    trend_insights = None
+    if result.get("trend_insights"):
+        import json
+        try:
+            if isinstance(result["trend_insights"], str):
+                trend_insights = json.loads(result["trend_insights"])
+            else:
+                trend_insights = result["trend_insights"]
+        except Exception:
+            pass
+
     # Generate recommendations if completed
     recommendations = None
-    if is_done:
+    if is_done and not is_upload:
         recommendations = _generate_recommendations(result)
 
     return {
         "status": status,
         "is_done": is_done,
         "video": result,
+        "analysis_type": analysis_type,
+        "trend_insights": trend_insights,
         "recommendations": recommendations,
     }
 

@@ -8,12 +8,16 @@
 const API_BASE = "/api";
 
 async function fetcher(path, options = {}) {
+  const headers = { ...options.headers };
+
+  // Only set Content-Type for non-FormData requests
+  if (!(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+    headers,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -54,13 +58,25 @@ export async function getTimeline() {
   return fetcher("/timeline");
 }
 
-export async function analyzeVideo(url) {
-  return fetcher("/analyze", {
+export async function analyzeVideo(videoFile, caption = "") {
+  const formData = new FormData();
+  formData.append("video", videoFile);
+  formData.append("caption", caption);
+
+  // Bypass Next.js proxy (which has a 10MB body size limit) and call Backend directly
+  const res = await fetch("http://127.0.0.1:8080/api/analyze", {
     method: "POST",
-    body: JSON.stringify({ url }),
+    body: formData,
   });
+  
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `API error: ${res.status}`);
+  }
+  return res.json();
 }
 
 export async function checkAnalysis(videoId) {
   return fetcher(`/analyze/${videoId}`);
 }
+

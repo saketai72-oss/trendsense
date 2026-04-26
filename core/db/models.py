@@ -46,6 +46,19 @@ def init_db():
                     is_rescraped BOOLEAN DEFAULT FALSE
                 )
             ''')
+            # Trend Alignment Score columns
+            for col_sql in [
+                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS video_duration REAL",
+                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS video_orientation VARCHAR(10)",
+                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS scene_cut_count INTEGER",
+                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS trend_alignment_score REAL",
+                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS trend_insights JSONB",
+                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS audio_transcript TEXT",
+            ]:
+                try:
+                    cursor.execute(col_sql)
+                except Exception:
+                    pass  # Column may already exist
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_is_rescraped ON videos(is_rescraped)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ai_status ON videos(ai_status)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)')
@@ -465,5 +478,154 @@ def insert_user_video(video_id: str, url: str):
     except Exception as e:
         conn.rollback()
         raise e
+    finally:
+        conn.close()
+
+
+# ==========================================
+# TREND ALIGNMENT BENCHMARK QUERIES
+# ==========================================
+
+def get_trending_categories(days=14):
+    """Top categories theo avg viral_velocity trong N ngày gần nhất."""
+    cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT unnest(category) as category,
+                       COUNT(*) as count,
+                       COALESCE(AVG(viral_velocity), 0) as avg_velocity,
+                       COALESCE(AVG(engagement_rate), 0) as avg_engagement
+                FROM videos
+                WHERE views > 0 AND ai_status = 'completed'
+                  AND scrape_date >= %s AND category IS NOT NULL
+                GROUP BY unnest(category)
+                ORDER BY avg_velocity DESC
+            """, (cutoff,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def get_trending_keywords(days=14, limit=50):
+    """Top keywords từ video viral (velocity > median) trong N ngày gần nhất."""
+    cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT top_keywords FROM videos
+                WHERE views > 0 AND ai_status = 'completed'
+                  AND scrape_date >= %s
+                  AND top_keywords IS NOT NULL AND top_keywords != ''
+                  AND viral_velocity > (
+                      SELECT COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY viral_velocity), 0)
+                      FROM videos WHERE views > 0 AND scrape_date >= %s
+                  )
+            """, (cutoff, cutoff))
+            rows = cur.fetchall()
+            from collections import Counter
+            kw_counter = Counter()
+            for row in rows:
+                for k in row["top_keywords"].split(","):
+                    k = k.strip()
+                    if k:
+                        kw_counter[k] += 1
+            return [{"keyword": k, "count": c} for k, c in kw_counter.most_common(limit)]
+    finally:
+        conn.close()
+
+
+def get_duration_stats_by_category(days=14):
+    """Thống kê MEDIAN duration của video viral vs tất cả, theo category."""
+    cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT
+                    unnest(category) as category,
+                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY video_duration) as median_duration,
+                    PERCENTILE_CONT(0.5) WITHIN GROUP (
+                        ORDER BY CASE WHEN viral_velocity > 0 THEN video_duration END
+                    ) as viral_median_duration,
+                    COUNT(*) as sample_count
+                FROM videos
+                WHERE views > 0 AND ai_status = 'completed'
+                  AND scrape_date >= %s AND category IS NOT NULL
+                  AND video_duration IS NOT NULL AND video_duration > 0
+                GROUP BY unnest(category)
+                HAVING COUNT(*) >= 3
+                ORDER BY viral_median_duration ASC NULLS LAST
+            """, (cutoff,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def get_viral_audio_transcripts(days=14, limit=30):
+    """Lấy audio transcript của top video viral gần nhất."""
+    cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT video_id, audio_transcript, viral_velocity
+                FROM videos
+                WHERE views > 0 AND ai_status = 'completed'
+                  AND scrape_date >= %s
+                  AND audio_transcript IS NOT NULL
+                  AND audio_transcript != ''
+                  AND audio_transcript != 'Không nghe được tiếng.'
+                  AND audio_transcript != 'Không có âm thanh.'
+                ORDER BY viral_velocity DESC
+                LIMIT %s
+            """, (cutoff, limit))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def update_upload_analysis(video_id, results):
+    """Cập nhật kết quả Trend Alignment Score cho video upload."""
+    import json
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE videos SET
+                    category = %s,
+                    video_description = %s,
+                    top_keywords = %s,
+                    video_sentiment = %s,
+                    positive_score = %s,
+                    video_duration = %s,
+                    video_orientation = %s,
+                    scene_cut_count = %s,
+                    trend_alignment_score = %s,
+                    trend_insights = %s,
+                    audio_transcript = %s,
+                    ai_status = %s
+                WHERE video_id = %s
+            """, (
+                results.get('category', []),
+                results.get('video_description', ''),
+                results.get('top_keywords', ''),
+                results.get('video_sentiment', '🟡 TRUNG LẬP'),
+                results.get('positive_score', 0),
+                results.get('video_duration'),
+                results.get('video_orientation'),
+                results.get('scene_cut_count'),
+                results.get('trend_alignment_score'),
+                json.dumps(results.get('trend_insights', {}), ensure_ascii=False),
+                results.get('audio_transcript', ''),
+                results.get('ai_status', 'completed'),
+                video_id,
+            ))
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] Failed to update upload analysis for {video_id}: {e}")
+        conn.rollback()
     finally:
         conn.close()

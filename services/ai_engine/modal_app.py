@@ -76,6 +76,18 @@ def _get_whisper():
     """Load Faster-Whisper model (base, float16 trên CUDA)."""
     global _whisper_model
     if _whisper_model is None:
+        import os
+        import site
+        # CTranslate2 cần libcublas.so.12. Torch đã cài sẵn trong site-packages/nvidia.
+        try:
+            site_pkgs = site.getsitepackages()[0]
+            os.environ["LD_LIBRARY_PATH"] = (
+                f"{site_pkgs}/nvidia/cublas/lib:{site_pkgs}/nvidia/cudnn/lib:"
+                + os.environ.get("LD_LIBRARY_PATH", "")
+            )
+        except Exception:
+            pass
+
         from faster_whisper import WhisperModel
         print("[*] Loading Whisper (base, CUDA float16)...")
         _whisper_model = WhisperModel(
@@ -123,6 +135,27 @@ def _get_ocr():
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
+
+def _save_uploaded_video(video_base64: str, video_id: str, filename: str = "upload.mp4"):
+    """Decode base64 video data and save to /tmp. Returns path or None."""
+    import base64
+
+    # Determine extension from filename
+    ext = "mp4"
+    if "." in filename:
+        ext = filename.rsplit(".", 1)[-1].lower()
+
+    out_path = f"/tmp/{video_id}.{ext}"
+    try:
+        video_bytes = base64.b64decode(video_base64)
+        with open(out_path, "wb") as f:
+            f.write(video_bytes)
+        print(f"    [✓] Saved uploaded video: {os.path.basename(out_path)} ({len(video_bytes) / 1024 / 1024:.1f} MB)")
+        return out_path
+    except Exception as e:
+        print(f"    [!] Failed to decode uploaded video: {str(e)[:120]}")
+        return None
+
 
 def _download_video(url: str, video_id: str):
     """Tải video từ TikTok vào /tmp bằng yt-dlp. Trả về path hoặc None."""
@@ -499,8 +532,459 @@ def _update_status(video_id, status):
 
 
 # ============================================================
-# MAIN GPU PROCESSING FUNCTION
+# VIDEO METADATA EXTRACTION
 # ============================================================
+
+def _extract_video_metadata(video_path):
+    """
+    Trích xuất metadata tĩnh từ video file.
+    Scene cut detection chạy trên bản resize 360p để tối ưu tài nguyên GPU.
+    """
+    import cv2
+    from moviepy import VideoFileClip
+
+    result = {
+        "duration": 0, "orientation": "unknown",
+        "scene_cut_count": 0, "width": 0, "height": 0, "fps": 0,
+    }
+
+    # 1. Duration từ MoviePy
+    try:
+        clip = VideoFileClip(video_path)
+        result["duration"] = round(clip.duration, 1)
+        clip.close()
+    except Exception:
+        pass
+
+    # 2. Resolution + Orientation từ OpenCV
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return result
+
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    result["width"], result["height"], result["fps"] = w, h, fps
+
+    if h > w * 1.2:
+        result["orientation"] = "portrait"
+    elif w > h * 1.2:
+        result["orientation"] = "landscape"
+    else:
+        result["orientation"] = "square"
+
+    # 3. Scene cut detection (resize → 360p, grayscale, frame diff)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    scale = min(360 / max(h, 1), 1.0)
+    new_w, new_h = int(w * scale), int(h * scale)
+    if new_w < 1:
+        new_w = 1
+    if new_h < 1:
+        new_h = 1
+
+    prev_gray = None
+    cuts = 0
+    sample_interval = max(int(fps / 5), 1)  # Sample 5 frames/giây
+
+    for i in range(0, total_frames, sample_interval):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        small = cv2.resize(frame, (new_w, new_h))
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+
+        if prev_gray is not None:
+            diff = cv2.absdiff(prev_gray, gray)
+            mean_diff = diff.mean()
+            if mean_diff > 35:  # Threshold cho scene change
+                cuts += 1
+        prev_gray = gray
+
+    cap.release()
+    result["scene_cut_count"] = cuts
+    return result
+
+
+# ============================================================
+# TREND BENCHMARK CACHE (per-container, TTL 2h)
+# ============================================================
+_benchmark_cache = {}
+_CACHE_TTL = 7200  # 2 giờ
+
+# Stopwords cho audio transcript matching
+_AUDIO_STOPWORDS = {
+    "và", "là", "của", "có", "trong", "với", "cho", "không", "những", "một",
+    "các", "khi", "để", "mà", "thì", "được", "này", "người", "tôi", "bạn",
+    "the", "to", "a", "is", "of", "it", "in", "for", "this", "that", "you",
+    "and", "but", "so", "are", "was", "with", "not", "on", "at", "from",
+}
+
+
+def _get_cached_benchmarks():
+    """
+    Lấy benchmark data từ Supabase, cache per-container 2h.
+    NOTE: Modal serverless = mỗi container có cache riêng. Chấp nhận ở giai đoạn này.
+    """
+    import time
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from collections import Counter
+
+    now = time.time()
+    if _benchmark_cache.get("ts", 0) + _CACHE_TTL > now:
+        return _benchmark_cache["data"]
+
+    db_url = os.environ["DATABASE_URL"]
+    conn = psycopg2.connect(db_url)
+    data = {
+        "trending_categories": [],
+        "trending_keywords": [],
+        "duration_stats": [],
+        "viral_transcripts": [],
+    }
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # 1. Trending categories
+            cur.execute("""
+                SELECT unnest(category) as category,
+                       COUNT(*) as count,
+                       COALESCE(AVG(viral_velocity), 0) as avg_velocity,
+                       COALESCE(AVG(engagement_rate), 0) as avg_engagement
+                FROM videos
+                WHERE views > 0 AND ai_status = 'completed'
+                  AND scrape_date >= CURRENT_DATE - INTERVAL '14 days'
+                  AND category IS NOT NULL
+                GROUP BY unnest(category)
+                ORDER BY avg_velocity DESC
+            """)
+            data["trending_categories"] = cur.fetchall()
+
+            # 2. Trending keywords (from videos with velocity > median)
+            cur.execute("""
+                SELECT top_keywords FROM videos
+                WHERE views > 0 AND ai_status = 'completed'
+                  AND scrape_date >= CURRENT_DATE - INTERVAL '14 days'
+                  AND top_keywords IS NOT NULL AND top_keywords != ''
+                  AND viral_velocity > (
+                      SELECT COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY viral_velocity), 0)
+                      FROM videos WHERE views > 0 AND scrape_date >= CURRENT_DATE - INTERVAL '14 days'
+                  )
+            """)
+            rows = cur.fetchall()
+            kw_counter = Counter()
+            for row in rows:
+                for k in row["top_keywords"].split(","):
+                    k = k.strip()
+                    if k:
+                        kw_counter[k] += 1
+            data["trending_keywords"] = [{"keyword": k, "count": c} for k, c in kw_counter.most_common(50)]
+
+            # 3. Duration stats by category (MEDIAN, not AVG)
+            cur.execute("""
+                SELECT
+                    unnest(category) as category,
+                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY video_duration) as median_duration,
+                    COUNT(*) as sample_count
+                FROM videos
+                WHERE views > 0 AND ai_status = 'completed'
+                  AND scrape_date >= CURRENT_DATE - INTERVAL '14 days'
+                  AND category IS NOT NULL
+                  AND video_duration IS NOT NULL AND video_duration > 0
+                GROUP BY unnest(category)
+                HAVING COUNT(*) >= 3
+                ORDER BY median_duration ASC NULLS LAST
+            """)
+            data["duration_stats"] = cur.fetchall()
+
+            # 4. Viral audio transcripts (top 30)
+            cur.execute("""
+                SELECT video_id, audio_transcript, viral_velocity
+                FROM videos
+                WHERE views > 0 AND ai_status = 'completed'
+                  AND scrape_date >= CURRENT_DATE - INTERVAL '14 days'
+                  AND audio_transcript IS NOT NULL
+                  AND audio_transcript != ''
+                  AND audio_transcript != 'Không nghe được tiếng.'
+                  AND audio_transcript != 'Không có âm thanh.'
+                ORDER BY viral_velocity DESC
+                LIMIT 30
+            """)
+            data["viral_transcripts"] = cur.fetchall()
+
+    except Exception as e:
+        print(f"    [!] Benchmark query error: {e}")
+    finally:
+        conn.close()
+
+    _benchmark_cache["data"] = data
+    _benchmark_cache["ts"] = now
+    print(f"    [📊] Loaded benchmarks: {len(data['trending_categories'])} cats, "
+          f"{len(data['trending_keywords'])} kws, {len(data['duration_stats'])} dur stats, "
+          f"{len(data['viral_transcripts'])} transcripts")
+    return data
+
+
+# ============================================================
+# TREND ALIGNMENT SCORER (Python Deterministic)
+# ============================================================
+
+def _score_trend_alignment(groq_result, metadata, audio_transcript, benchmarks):
+    """
+    Tính Trend Alignment Score (0-100) hoàn toàn bằng Python.
+    Dynamic weight redistribution nếu audio rỗng (video nhạc/dance).
+    """
+    has_audio = bool(
+        audio_transcript and audio_transcript.strip()
+        and audio_transcript not in ["Không nghe được tiếng.", "Không có âm thanh.", "Lỗi trích xuất âm thanh."]
+    )
+
+    # --- Dynamic Weights ---
+    weights = {"category": 30, "content": 25, "audio": 20, "duration": 15, "format": 10}
+    if not has_audio:
+        weights.pop("audio")
+        total_remaining = sum(weights.values())  # 80
+        for k in weights:
+            weights[k] = round(weights[k] / total_remaining * 100)
+        # → category≈37, content≈31, duration≈19, format≈13
+
+    scores = {}
+
+    # ═══ 1. CATEGORY SCORE ═══
+    video_category = groq_result.get("category", "")
+    trending_cats = benchmarks.get("trending_categories", [])
+    cat_names = [c["category"] for c in trending_cats]
+    cat_rank = next((i for i, name in enumerate(cat_names) if name == video_category), 99)
+
+    if cat_rank < 3:
+        scores["category"] = {"raw": 1.0, "label": "🔥 Top 3 trending"}
+    elif cat_rank < 5:
+        scores["category"] = {"raw": 0.7, "label": "📈 Top 5 trending"}
+    elif cat_rank < 8:
+        scores["category"] = {"raw": 0.4, "label": "📊 Trung bình"}
+    else:
+        scores["category"] = {"raw": 0.15, "label": "📉 Ít phổ biến"}
+
+    # ═══ 2. CONTENT/KEYWORD SCORE ═══
+    video_keywords = set(k.lower().strip() for k in groq_result.get("keywords", []) if k.strip())
+    trending_kws = set(k["keyword"].lower() for k in benchmarks.get("trending_keywords", []))
+
+    if video_keywords and trending_kws:
+        overlap = len(video_keywords & trending_kws)
+        ratio = min(overlap / max(len(video_keywords), 1), 1.0)
+        raw = min(ratio * 2.5, 1.0)
+        scores["content"] = {"raw": raw, "label": f"{overlap} keywords trùng trend"}
+    else:
+        scores["content"] = {"raw": 0.2, "label": "Chưa đủ dữ liệu keywords"}
+
+    # ═══ 3. AUDIO SCORE (skip nếu không có giọng nói) ═══
+    if has_audio:
+        viral_transcripts = benchmarks.get("viral_transcripts", [])
+        audio_words = set(audio_transcript.lower().split()) - _AUDIO_STOPWORDS
+        trending_audio_words = set()
+        for vt in viral_transcripts:
+            t = vt.get("audio_transcript", "")
+            if t:
+                trending_audio_words.update(set(t.lower().split()[:50]) - _AUDIO_STOPWORDS)
+
+        if trending_audio_words and audio_words:
+            audio_overlap = len(audio_words & trending_audio_words)
+            audio_raw = min(audio_overlap / 10, 1.0)
+        else:
+            audio_raw = 0.5  # Neutral nếu chưa có benchmark
+
+        label = "🔥 Nội dung audio bám trend" if audio_raw > 0.6 else (
+            "📝 Có nội dung audio" if audio_raw > 0.3 else "💬 Audio ít liên quan trend"
+        )
+        scores["audio"] = {"raw": audio_raw, "label": label}
+
+    # ═══ 4. DURATION SCORE ═══
+    duration = metadata.get("duration", 0)
+    duration_stats = benchmarks.get("duration_stats", [])
+    cat_duration = next((d for d in duration_stats if d["category"] == video_category), None)
+
+    if cat_duration and duration > 0:
+        optimal = float(cat_duration.get("median_duration") or 15)
+        if optimal <= 0:
+            optimal = 15
+        deviation = abs(duration - optimal) / max(optimal, 1)
+        dur_raw = max(1.0 - deviation, 0)
+
+        if duration <= 15:
+            label = f"✅ Ngắn gọn ({duration:.0f}s)"
+        elif duration <= 30:
+            label = f"📏 Vừa phải ({duration:.0f}s, chuẩn: {optimal:.0f}s)"
+        else:
+            label = f"⚠️ Dài ({duration:.0f}s, chuẩn viral: {optimal:.0f}s)"
+        scores["duration"] = {"raw": dur_raw, "label": label}
+    else:
+        # Fallback: video ngắn < 30s → tốt, > 60s → kém
+        if duration <= 30:
+            scores["duration"] = {"raw": 0.7, "label": f"📏 {duration:.0f}s (chưa có benchmark)"}
+        else:
+            scores["duration"] = {"raw": 0.3, "label": f"⚠️ {duration:.0f}s (có thể quá dài)"}
+
+    # ═══ 5. FORMAT SCORE ═══
+    orientation = metadata.get("orientation", "unknown")
+    scene_cuts = metadata.get("scene_cut_count", 0)
+    fmt_raw = 0.0
+
+    if orientation == "portrait":
+        fmt_raw += 0.5
+        orient_label = "✅ Dọc (chuẩn TikTok)"
+    elif orientation == "square":
+        fmt_raw += 0.3
+        orient_label = "📐 Vuông"
+    else:
+        fmt_raw += 0.1
+        orient_label = "⚠️ Ngang (không tối ưu cho TikTok)"
+
+    if duration > 15 and scene_cuts >= 3:
+        fmt_raw += 0.5
+        cut_label = f"✅ {scene_cuts} cắt cảnh (nhịp nhanh)"
+    elif duration <= 15:
+        fmt_raw += 0.4
+        cut_label = f"Video ngắn ({scene_cuts} cuts)"
+    else:
+        fmt_raw += 0.15
+        cut_label = f"⚠️ Chỉ {scene_cuts} cắt cảnh cho video {duration:.0f}s"
+
+    scores["format"] = {"raw": fmt_raw, "label": f"{orient_label} · {cut_label}"}
+
+    # ═══ TÍNH TỔNG ═══
+    total = 0
+    breakdown = {}
+    for key, w in weights.items():
+        if key in scores:
+            pts = round(scores[key]["raw"] * w, 1)
+            total += pts
+            breakdown[key] = {
+                "score": pts,
+                "max": w,
+                "pct": round(scores[key]["raw"] * 100),
+                "label": scores[key]["label"],
+            }
+
+    return {
+        "trend_alignment_score": round(min(total, 100), 1),
+        "breakdown": breakdown,
+        "has_audio": has_audio,
+        "weights_used": weights,
+    }
+
+
+# ============================================================
+# GROQ TREND INSIGHT GENERATOR
+# ============================================================
+
+def _generate_trend_insights(score_result, groq_summary, metadata):
+    """
+    Groq sinh nhận xét tự nhiên + đề xuất hành động từ scores đã tính bằng Python.
+    Groq KHÔNG tự tính điểm — chỉ viết nhận xét dựa trên scores có sẵn.
+    """
+    import json
+    from groq import Groq
+
+    breakdown_str = json.dumps(score_result.get("breakdown", {}), ensure_ascii=False, indent=2)
+    total_score = score_result.get("trend_alignment_score", 0)
+
+    prompt = f"""Bạn là chuyên gia tư vấn nội dung TikTok Việt Nam hàng đầu.
+
+ĐIỂM PHÂN TÍCH VIDEO (đã tính sẵn bằng hệ thống, KHÔNG ĐƯỢC thay đổi):
+- Tổng điểm bám trend: {total_score}/100
+- Chi tiết các trục:
+{breakdown_str}
+- Tóm tắt video: {groq_summary}
+- Thời lượng: {metadata.get('duration', 0)}s | Định dạng: {metadata.get('orientation', 'unknown')} | Cắt cảnh: {metadata.get('scene_cut_count', 0)}
+
+NHIỆM VỤ: Dựa CHÍNH XÁC vào các điểm số trên, viết nhận xét ngắn gọn bằng tiếng Việt.
+- Nêu 1 điểm mạnh nổi bật nhất
+- Nêu 1-2 đề xuất cải thiện CỤ THỂ, THỰC TẾ (vd: "cắt ngắn xuống 15s", "đổi sang khung dọc")
+- Viết nhận xét tổng quan 2-3 câu
+
+TRẢ VỀ ĐÚNG JSON:
+{{"overall_comment": "Nhận xét tổng quan 2-3 câu", "top_strength": "Điểm mạnh nổi bật nhất", "top_improvement": "Đề xuất cải thiện quan trọng nhất"}}"""
+
+    try:
+        client = Groq(api_key=os.environ["GROQ_API_KEY"])
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.4,
+            max_tokens=300,
+        )
+        data = json.loads(response.choices[0].message.content)
+        if "overall_comment" in data:
+            return data
+    except Exception as e:
+        print(f"    [!] Groq insight error: {e}")
+
+    # Fallback: template-based insights
+    return {
+        "overall_comment": f"Video đạt {total_score}/100 điểm bám trend. Hãy xem chi tiết từng trục để tối ưu.",
+        "top_strength": "Xem breakdown chi tiết ở trên.",
+        "top_improvement": "Hãy tập trung vào trục có điểm thấp nhất để cải thiện.",
+    }
+
+
+# ============================================================
+# UPLOAD ANALYSIS — Supabase Writer
+# ============================================================
+
+def _update_supabase_upload(video_id, results):
+    """Ghi kết quả Trend Alignment Score vào bảng videos trên Supabase."""
+    import psycopg2
+    import json
+
+    db_url = os.environ["DATABASE_URL"]
+    conn = psycopg2.connect(db_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE videos SET
+                    category = %s,
+                    video_description = %s,
+                    top_keywords = %s,
+                    video_sentiment = %s,
+                    positive_score = %s,
+                    video_duration = %s,
+                    video_orientation = %s,
+                    scene_cut_count = %s,
+                    trend_alignment_score = %s,
+                    trend_insights = %s,
+                    audio_transcript = %s,
+                    ai_status = %s
+                WHERE video_id = %s
+                """,
+                (
+                    [results.get("category")] if results.get("category") not in ["🌍 Khác", "Lỗi"] else [],
+                    results.get("video_description", ""),
+                    results.get("top_keywords", ""),
+                    results.get("video_sentiment", "🟡 TRUNG LẬP"),
+                    results.get("positive_score", 0),
+                    results.get("video_duration"),
+                    results.get("video_orientation"),
+                    results.get("scene_cut_count"),
+                    results.get("trend_alignment_score"),
+                    json.dumps(results.get("trend_insights", {}), ensure_ascii=False) if results.get("trend_insights") else None,
+                    results.get("audio_transcript", ""),
+                    results.get("ai_status", "completed"),
+                    video_id,
+                ),
+            )
+        conn.commit()
+        print(f"    [✓] Đã cập nhật Supabase (upload): {video_id}")
+    except Exception as e:
+        print(f"    [!] Supabase upload error: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
 @app.function(
     image=gpu_image,
     gpu="T4",
@@ -522,14 +1006,22 @@ def process_video(video_data: dict):
     print(f"🎬 MODAL AI WORKER — Processing: {video_id}")
     print(f"{'=' * 60}")
 
-    # ── BƯỚC 1: Tải video từ TikTok vào /tmp ──
-    print("  [1/5] 📥 Downloading video...")
-    _update_status(video_id, "downloading")
-    video_path = _download_video(url, video_id)
+    # ── BƯỚC 1: Lấy video (Upload base64 hoặc Download từ URL) ──
+    video_base64 = video_data.get("video_base64", "")
+    video_filename = video_data.get("video_filename", "upload.mp4")
+
+    if video_base64:
+        print("  [1/5] 📂 Decoding uploaded video...")
+        _update_status(video_id, "downloading")
+        video_path = _save_uploaded_video(video_base64, video_id, video_filename)
+    else:
+        print("  [1/5] 📥 Downloading video from URL...")
+        _update_status(video_id, "downloading")
+        video_path = _download_video(url, video_id)
 
     if not video_path:
         _update_supabase(video_id, {
-            "video_description": "Không tải được video từ TikTok.",
+            "video_description": "Không thể xử lý video (tải/giải mã thất bại).",
             "category": "🌍 Khác",
             "video_sentiment": "🟡 TRUNG LẬP",
             "positive_score": 50.0,
@@ -538,8 +1030,8 @@ def process_video(video_data: dict):
             "viral_velocity": 0, "viral_probability": 0,
             "ai_status": "error",
         })
-        print(f"  ❌ Failed: {video_id} (download error)")
-        return {"status": "error", "video_id": video_id, "reason": "download_failed"}
+        print(f"  ❌ Failed: {video_id} (video acquisition error)")
+        return {"status": "error", "video_id": video_id, "reason": "video_acquisition_failed"}
 
     try:
         # ── BƯỚC 2: Trích xuất frames ──
@@ -583,36 +1075,78 @@ def process_video(video_data: dict):
                 groq_result["ai_status"] = "error"
                 groq_result["category"] = "Lỗi"
 
-        # ── BƯỚC 5: Tính metrics + Ghi Supabase ──
-        print("  [5/5] 📊 Computing metrics & writing to Supabase...")
-        metrics = _calculate_metrics(video_data)
+        # ── BƯỚC 5: Phân nhánh theo loại video ──
+        is_upload = bool(video_data.get("video_base64", ""))
 
-        final = {
-            "video_description": groq_result.get("summary", ""),
-            "category": groq_result.get("category", "🌍 Khác"),
-            "video_sentiment": groq_result.get("sentiment", "🟡 TRUNG LẬP"),
-            "positive_score": groq_result.get("positive_score", 50.0),
-            "top_keywords": ", ".join(groq_result.get("keywords", [])[:5]),
-            "views_per_hour": metrics["vph"],
-            "engagement_rate": metrics["er"],
-            "viral_velocity": metrics["velocity"],
-            "viral_probability": 0.0,  # Sẽ được tính bởi weekly_train workflow
-            "ai_status": groq_result.get("ai_status", "completed"),
-        }
+        if is_upload:
+            print("  [5/6] 📐 Extracting video metadata...")
+            metadata = _extract_video_metadata(video_path)
+            
+            print("  [6/6] 🎯 Computing Trend Alignment Score...")
+            benchmarks = _get_cached_benchmarks()
+            score_result = _score_trend_alignment(groq_result, metadata, audio_text, benchmarks)
+            
+            # Groq sinh nhận xét
+            insights = _generate_trend_insights(score_result, groq_result.get("summary", ""), metadata)
+            
+            final = {
+                "video_description": groq_result.get("summary", ""),
+                "category": groq_result.get("category", "🌍 Khác"),
+                "video_sentiment": groq_result.get("sentiment", "🟡 TRUNG LẬP"),
+                "positive_score": groq_result.get("positive_score", 50.0),
+                "top_keywords": ", ".join(groq_result.get("keywords", [])[:5]),
+                "video_duration": metadata.get("duration", 0),
+                "video_orientation": metadata.get("orientation", "unknown"),
+                "scene_cut_count": metadata.get("scene_cut_count", 0),
+                "trend_alignment_score": score_result.get("trend_alignment_score", 0),
+                "trend_insights": {**score_result, **insights},
+                "audio_transcript": audio_text,
+                "ai_status": groq_result.get("ai_status", "completed"),
+            }
 
-        _update_supabase(video_id, final)
+            _update_supabase_upload(video_id, final)
 
-        # Persist model cache vào Volume (cho lần cold start tiếp theo)
-        try:
-            model_volume.commit()
-        except Exception:
-            pass  # Bỏ qua nếu API thay đổi
+            # Persist model cache vào Volume (cho lần cold start tiếp theo)
+            try:
+                model_volume.commit()
+            except Exception:
+                pass  # Bỏ qua nếu API thay đổi
 
-        print(f"\n  ✅ HOÀN THÀNH: {video_id}")
-        print(f"     🏷️ {final['category']} | {final['video_description'][:60]}...")
-        print(f"     📊 VPH={metrics['vph']} | ER={metrics['er']}% | Velocity={metrics['velocity']}")
+            print(f"\n  ✅ HOÀN THÀNH: {video_id}")
+            print(f"     🏷️ {final['category']} | Trend Alignment Score: {final['trend_alignment_score']}")
 
-        return {"status": "completed", "video_id": video_id}
+            return {"status": "completed", "video_id": video_id}
+            
+        else:
+            print("  [5/5] 📊 Computing metrics & writing to Supabase...")
+            metrics = _calculate_metrics(video_data)
+
+            final = {
+                "video_description": groq_result.get("summary", ""),
+                "category": groq_result.get("category", "🌍 Khác"),
+                "video_sentiment": groq_result.get("sentiment", "🟡 TRUNG LẬP"),
+                "positive_score": groq_result.get("positive_score", 50.0),
+                "top_keywords": ", ".join(groq_result.get("keywords", [])[:5]),
+                "views_per_hour": metrics["vph"],
+                "engagement_rate": metrics["er"],
+                "viral_velocity": metrics["velocity"],
+                "viral_probability": 0.0,  # Sẽ được tính bởi weekly_train workflow
+                "ai_status": groq_result.get("ai_status", "completed"),
+            }
+
+            _update_supabase(video_id, final)
+
+            # Persist model cache vào Volume (cho lần cold start tiếp theo)
+            try:
+                model_volume.commit()
+            except Exception:
+                pass  # Bỏ qua nếu API thay đổi
+
+            print(f"\n  ✅ HOÀN THÀNH: {video_id}")
+            print(f"     🏷️ {final['category']} | {final['video_description'][:60]}...")
+            print(f"     📊 VPH={metrics['vph']} | ER={metrics['er']}% | Velocity={metrics['velocity']}")
+
+            return {"status": "completed", "video_id": video_id}
 
     finally:
         # Dọn dẹp video khỏi /tmp (Analyze & Destroy)
