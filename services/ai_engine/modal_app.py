@@ -987,10 +987,11 @@ def _update_supabase_upload(video_id, results):
 
 @app.function(
     image=gpu_image,
-    gpu="T4",
+    gpu=["T4", "L4"],
     secrets=[modal.Secret.from_name("trendsense-secrets")],
     volumes={MODEL_DIR: model_volume},
-    timeout=600,
+    timeout=300,
+    scaledown_window=30,
     max_containers=3,  # Giới hạn 3 container tải video/chạy AI cùng lúc để tránh rate limit của Groq
 )
 def process_video(video_data: dict):

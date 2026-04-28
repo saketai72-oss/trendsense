@@ -25,15 +25,16 @@ from services.tiktok_scraper.content_parser import extract_basic_stats, extract_
 
 
 
-def _trigger_modal(video_id, url, video_data, top_comments):
+def _trigger_ai_pipeline(video_id, url, video_data, top_comments):
     """
-    Gửi nhỏ giọt (drip-feed) từng video sang Modal AI Core.
-    Fire-and-forget: Modal spawn GPU worker bất đồng bộ.
-    Nếu MODAL_WEBHOOK_URL không được cấu hình → bỏ qua.
+    Gửi nhỏ giọt (drip-feed) từng video sang Backend (Gemini 1.5 Flash).
+    Nếu Backend chết hoặc lỗi hệ thống mạng (5xx), Fallback ngay sang Modal.
+    Backend (FastAPI) sẽ xử lý ngầm (Background Task) và tự lo Fallback nội bộ nếu Gemini API lỗi.
     """
+    # URL của Gemini Backend Endpoint (local hoặc domain tùy cấu hình)
+    # Lấy từ ENV hoặc fallback về localhost
+    gemini_url = os.getenv("GEMINI_WEBHOOK_URL", "http://localhost:8000/api/analyze-gemini")
     modal_url = settings.MODAL_WEBHOOK_URL
-    if not modal_url:
-        return
 
     payload = {
         "video_id": video_id,
@@ -52,16 +53,36 @@ def _trigger_modal(video_id, url, video_data, top_comments):
     }
 
     try:
-        resp = requests.post(modal_url, json=payload, timeout=15)
-        if resp.status_code == 200:
-            result = resp.json()
-            print(f"  [🚀] Đã gửi sang Modal AI → {result.get('status', 'ok')}")
+        # Gửi tới Gemini Backend trước (95% Primary)
+        resp = requests.post(gemini_url, json=payload, timeout=5)
+        
+        if resp.status_code == 202:
+            print(f"  [🚀] Đã gửi sang Gemini AI Backend → Accepted")
+            return
+            
+        elif resp.status_code in [429, 500, 502, 503, 504]:
+            print(f"  [!] Gemini Backend báo lỗi hệ thống ({resp.status_code}). Đang Fallback sang Modal...")
+            raise RuntimeError("Backend Error")
         else:
-            print(f"  [!] Modal HTTP {resp.status_code}: {resp.text[:80]}")
-    except requests.exceptions.Timeout:
-        print(f"  [!] Modal timeout (vẫn có thể đã nhận request).")
+            print(f"  [!] Gemini Backend báo lỗi logic ({resp.status_code}): {resp.text[:80]}. KHÔNG Fallback.")
+            return
+
     except Exception as e:
-        print(f"  [!] Lỗi kết nối Modal: {str(e)[:60]}")
+        # Lỗi mạng hoặc Backend chết hẳn -> Fallback sang Modal
+        print(f"  [⚠️] Kết nối Gemini Backend thất bại ({str(e)[:40]}). Kích hoạt Fallback sang Modal...")
+        if not modal_url:
+            print("  [!] Không có MODAL_WEBHOOK_URL để fallback.")
+            return
+            
+        try:
+            m_resp = requests.post(modal_url, json=payload, timeout=15)
+            if m_resp.status_code == 200:
+                print(f"  [🛡️] Đã gửi Fallback sang Modal AI thành công.")
+            else:
+                print(f"  [!] Modal Fallback lỗi HTTP {m_resp.status_code}: {m_resp.text[:80]}")
+        except Exception as me:
+            print(f"  [!] Lỗi cả Modal Fallback: {str(me)[:60]}")
+
 
 
 def main():
@@ -193,7 +214,7 @@ def main():
                 mark_as_scraped(video_id)
                 
                 # 🚀 Nhỏ giọt: Gửi video này sang Modal AI Core xử lý
-                _trigger_modal(video_id, link, video_data, top_5_comments)
+                _trigger_ai_pipeline(video_id, link, video_data, top_5_comments)
             else:
                 print(f"  [!] Thất bại khi lưu video {video_id} vào DB. Sẽ không đánh dấu history.")
 

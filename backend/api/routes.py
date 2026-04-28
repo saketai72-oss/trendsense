@@ -2,7 +2,7 @@
 TrendSense API — Video Routes
 All endpoints for video data, stats, and analysis.
 """
-from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 import math
@@ -237,6 +237,37 @@ async def analyze_video(
         }
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Lỗi kết nối Modal: {str(e)[:200]}")
+
+
+# ──────────────────────────────────────────────────
+# POST /api/analyze-gemini — Scraper Webhook (Gemini Primary)
+# ──────────────────────────────────────────────────
+@router.post("/analyze-gemini", status_code=202)
+async def analyze_gemini_webhook(
+    payload: dict,
+    background_tasks: BackgroundTasks
+):
+    """
+    Webhook dành cho Scraper gửi video sang xử lý bằng Gemini 1.5 Flash.
+    Trả về 202 Accepted ngay lập tức để không block event loop của FastAPI.
+    Quá trình tải yt-dlp và xử lý Gemini được đưa vào background_tasks.
+    """
+    video_id = payload.get("video_id")
+    url = payload.get("url")
+    
+    if not video_id or not url:
+        raise HTTPException(status_code=400, detail="Thiếu video_id hoặc url")
+
+    from backend.api.gemini_engine import process_video_with_gemini
+    
+    # Ném tác vụ phân tích vào background
+    background_tasks.add_task(process_video_with_gemini, payload)
+    
+    return {
+        "status": "queued",
+        "video_id": video_id,
+        "message": f"Video {video_id} đã đưa vào hàng đợi Gemini 1.5 Flash."
+    }
 
 
 # ──────────────────────────────────────────────────
