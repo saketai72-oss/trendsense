@@ -304,15 +304,34 @@ export default function HomePage() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {(() => {
-                  const uniqueCategories = [];
-                  const seen = new Set();
+                  const categoryMap = {};
                   for (const cat of categories) {
                     const mainCategory = (cat.category || "—").split(",")[0].split("|")[0].trim();
-                    if (!seen.has(mainCategory)) {
-                      seen.add(mainCategory);
-                      uniqueCategories.push({ ...cat, mainCategory });
+                    if (!categoryMap[mainCategory]) {
+                      categoryMap[mainCategory] = {
+                        mainCategory,
+                        count: 0,
+                        total_viral: 0,
+                        total_velocity: 0,
+                        total_engagement: 0,
+                      };
                     }
+                    const c = categoryMap[mainCategory];
+                    c.count += Number(cat.count || 0);
+                    c.total_viral += Number(cat.avg_viral || 0) * Number(cat.count || 0);
+                    c.total_velocity += Number(cat.avg_velocity || 0) * Number(cat.count || 0);
+                    c.total_engagement += Number(cat.avg_engagement || 0) * Number(cat.count || 0);
                   }
+
+                  const uniqueCategories = Object.values(categoryMap).map(c => ({
+                    mainCategory: c.mainCategory,
+                    count: c.count,
+                    avg_viral: c.count > 0 ? c.total_viral / c.count : 0,
+                    avg_velocity: c.count > 0 ? c.total_velocity / c.count : 0,
+                    avg_engagement: c.count > 0 ? c.total_engagement / c.count : 0,
+                  }));
+                  
+                  uniqueCategories.sort((a, b) => b.avg_velocity - a.avg_velocity);
                   
                   const displayLimit = uniqueCategories.length >= 6 ? 6 : (uniqueCategories.length >= 3 ? 3 : uniqueCategories.length);
                   const displayCats = uniqueCategories.slice(0, displayLimit);
