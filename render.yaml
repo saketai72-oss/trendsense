@@ -1,0 +1,67 @@
+## render.yaml — TrendSense Backend (Free Tier)
+## Render Blueprint: https://render.com/docs/blueprint-spec
+##
+## Deploy 1 service duy nhất:
+##   - FastAPI (uvicorn) — HTTP server chính
+##   - RQ Worker thread chạy in-process (lifespan event trong main.py)
+##
+## Upstash Redis / Supabase / Modal đã là external services, không khai báo ở đây.
+
+services:
+  - type: web
+    name: trendsense-backend
+    runtime: python
+    plan: free
+    region: singapore          # Gần Việt Nam nhất trong các region Render hỗ trợ
+
+    ## ── Build ────────────────────────────────────────────────────────────
+    ## rootDir mặc định là repo root — đúng để Python tìm được `core/` và `backend/`
+    buildCommand: pip install -r backend/requirements.txt
+
+    ## ── Start ─────────────────────────────────────────────────────────────
+    ## $PORT do Render inject — KHÔNG hardcode 8080
+    startCommand: python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+
+    ## ── Health Check ──────────────────────────────────────────────────────
+    ## Render dùng để biết service đã sẵn sàng chưa
+    healthCheckPath: /
+
+    ## ── Environment Variables ─────────────────────────────────────────────
+    ## sync: false → không đồng bộ tự động, phải set tay trong Dashboard
+    ## (Giá trị thật KHÔNG commit vào repo — đặt trong Render Dashboard > Environment)
+    envVars:
+      ## Database
+      - key: DATABASE_URL
+        sync: false
+
+      ## Supabase Storage
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: videos             # Giá trị cố định, an toàn để commit
+
+      ## Redis (Upstash)
+      - key: REDIS_URL
+        sync: false
+
+      ## AI APIs
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+      ## Modal GPU Worker
+      - key: MODAL_WEBHOOK_URL
+        sync: false
+
+      ## CORS — Điền URL frontend sau khi deploy (Vercel/Render/localhost)
+      - key: FRONTEND_URL
+        sync: false
+
+      ## Scraper Proxy List (JSON array string)
+      - key: PROXY_LIST
+        sync: false

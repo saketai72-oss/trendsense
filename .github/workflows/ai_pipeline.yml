@@ -16,6 +16,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       MODAL_WEBHOOK_URL: ${{ secrets.MODAL_WEBHOOK_URL }}
+      GEMINI_WEBHOOK_URL: ${{ secrets.GEMINI_WEBHOOK_URL }}
       PROXY_LIST: ${{ secrets.PROXY_LIST }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
