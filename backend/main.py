@@ -4,11 +4,15 @@ TrendSense Backend — FastAPI Application
 Cung cấp REST API cho React Frontend.
 Chạy: python -m uvicorn backend.main:app --reload --port 8000
 
-Render Free Tier: RQ Worker chạy in-process via threading.Thread(daemon=True)
-trong lifespan event — job vẫn an toàn trên Upstash Redis khi container restart.
+Render Free Tier:
+  RQ Worker chạy như subprocess độc lập (không phải thread) để tránh lỗi
+  "signal only works in main thread" — signal.signal() cần main thread của
+  từng process, không hoạt động trong daemon thread của uvicorn.
 """
 import logging
-import threading
+import subprocess
+import sys
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -26,81 +30,52 @@ from backend.api.rate_limiter import limiter
 
 logger = logging.getLogger("trendsense.main")
 
-# ── RQ Worker In-Process (Render Free Tier Workaround) ────────────────────────
+
+# ── RQ Worker Subprocess (Render Free Tier Workaround) ────────────────────────
 #
-# Root cause của lỗi "signal only works in main thread":
-#   BaseWorker.work() luôn gọi self.setup_signal_handlers() trước khi listen.
-#   setup_signal_handlers() dùng signal.signal() — chỉ hoạt động trên main thread.
-#   SimpleWorker trong RQ 2.8.0 KHÔNG override hàm này → vẫn lỗi trong thread.
+# Tại sao dùng subprocess thay threading.Thread:
 #
-# Fix: Subclass SimpleWorker, override setup_signal_handlers() thành no-op hoàn toàn.
-# Render kill container bằng SIGTERM gửi tới main process (uvicorn) → daemon thread
-# tự die theo — không cần graceful shutdown handler.
+#   signal.signal() CHỈ hoạt động trên main thread của main interpreter.
+#   Mọi cách dùng thread (Worker, SimpleWorker, subclass) đều fail vì RQ
+#   gọi signal.signal() ở NHIỀU chỗ: setup_signal_handlers(), vòng lặp dequeue
+#   (SIGALRM cho job timeout), và scheduler.
+#
+#   Subprocess có main thread RIÊNG → signal hoạt động bình thường.
+#   Render kill container bằng SIGTERM → PID 1 → tất cả child processes đều die.
+#   backend/worker.py đã tự thêm project root vào sys.path → chạy được độc lập.
 
-def _run_rq_worker() -> None:
+def _start_rq_worker_process() -> subprocess.Popen:
     """
-    Chạy ThreadSafeWorker (SimpleWorker subclass) trong daemon thread.
-    ThreadSafeWorker.setup_signal_handlers() là no-op → không raise ValueError.
-    Job timeout (900s) và retry logic vẫn hoạt động bình thường.
-    ssl_cert_reqs=None: bypass TLS cert check cho Upstash rediss:// URL.
+    Khởi động backend/worker.py như subprocess độc lập.
+    Kế thừa toàn bộ env vars từ Render (DATABASE_URL, REDIS_URL, v.v.).
+    Trả về Popen object để lifespan có thể terminate khi shutdown.
     """
-    import os
-    try:
-        from redis import Redis
-        from rq import SimpleWorker, Queue
-
-        # ── ThreadSafeWorker: override signal setup thành no-op ──────────────
-        class ThreadSafeWorker(SimpleWorker):
-            def setup_signal_handlers(self) -> None:
-                """
-                No-op: signal.signal() chỉ hoạt động trên main thread.
-                Daemon thread tự die khi uvicorn process thoát (SIGTERM → main).
-                Không cần graceful shutdown handler trong thread context.
-                """
-                pass
-        # ─────────────────────────────────────────────────────────────────────
-
-        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-        logger.info("[Worker] Đang kết nối Redis: %s", redis_url[:40] + "...")
-
-        conn = Redis.from_url(redis_url, ssl_cert_reqs=None)
-        conn.ping()
-        logger.info("[Worker] ✅ Redis connected")
-
-        queue = Queue("gemini_jobs", connection=conn, default_timeout=900)
-        worker = ThreadSafeWorker([queue], connection=conn)
-
-        logger.info("[Worker] 🚀 Lắng nghe queue 'gemini_jobs' (ThreadSafeWorker)...")
-        worker.work(burst=False)
-
-    except Exception as exc:
-        logger.error("[Worker] ❌ Worker thread gặp lỗi, dừng lại: %s", exc)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "backend.worker"],
+        env=os.environ.copy(),   # Kế thừa env vars từ Render
+        # stdout/stderr kế thừa từ parent → log xuất ra Render log stream
+    )
+    logger.info("[Worker] 🚀 RQ Worker subprocess started (PID=%s)", proc.pid)
+    return proc
 
 
 # ── Lifespan — Startup / Shutdown ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Lifespan context manager thay thế @app.on_event (deprecated trong FastAPI ≥ 0.93).
-
-    Startup:
-        - Spawn RQ Worker thread (daemon) → xử lý gemini_jobs từ Upstash Redis.
-    Shutdown:
-        - Daemon thread tự die khi uvicorn process thoát. Không cần cleanup thủ công.
+    Startup: Spawn RQ Worker subprocess → xử lý gemini_jobs từ Upstash Redis.
+    Shutdown: Terminate subprocess (Render kill container → tất cả processes die).
     """
     logger.info("[Lifespan] 🚀 TrendSense backend đang khởi động...")
 
-    worker_thread = threading.Thread(
-        target=_run_rq_worker,
-        daemon=True,          # Die cùng main process
-        name="rq-gemini-worker",
-    )
-    worker_thread.start()
-    logger.info("[Lifespan] 🧵 RQ Worker thread started (id=%s)", worker_thread.ident)
+    worker_proc = _start_rq_worker_process()
 
     yield  # ← App đang chạy, nhận request ở đây
 
-    logger.info("[Lifespan] 🛑 TrendSense backend đang shutdown...")
+    logger.info(
+        "[Lifespan] 🛑 Shutdown — dừng RQ Worker (PID=%s)...", worker_proc.pid
+    )
+    worker_proc.terminate()
 
 
 # ── FastAPI App ────────────────────────────────────────────────────────────────
