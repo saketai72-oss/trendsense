@@ -251,22 +251,12 @@ def analyze_video(request: Request, body: AnalyzeRequest):
 # Rate limit: 60 req / IP / phút (internal webhook)
 # ─────────────────────────────────────────────────────
 @router.post("/analyze-gemini", status_code=202)
+@limiter.limit("60/minute")
 def analyze_gemini_webhook(request: Request, payload: dict):
     """
     Webhook từ Scraper. Đẩy job vào Redis Queue thay vì BackgroundTasks.
     Job survive được server restart và tự retry khi Gemini 429/503.
     """
-    from backend.main import limiter
-
-    @limiter.limit("60/minute")
-    def _check_limit(req: Request):
-        pass
-
-    try:
-        _check_limit(request)
-    except Exception:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
-
     video_id = payload.get("video_id")
     url = payload.get("url")
 
