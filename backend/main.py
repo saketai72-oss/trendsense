@@ -27,42 +27,53 @@ from backend.api.rate_limiter import limiter
 logger = logging.getLogger("trendsense.main")
 
 # ── RQ Worker In-Process (Render Free Tier Workaround) ────────────────────────
+#
+# Root cause của lỗi "signal only works in main thread":
+#   BaseWorker.work() luôn gọi self.setup_signal_handlers() trước khi listen.
+#   setup_signal_handlers() dùng signal.signal() — chỉ hoạt động trên main thread.
+#   SimpleWorker trong RQ 2.8.0 KHÔNG override hàm này → vẫn lỗi trong thread.
+#
+# Fix: Subclass SimpleWorker, override setup_signal_handlers() thành no-op hoàn toàn.
+# Render kill container bằng SIGTERM gửi tới main process (uvicorn) → daemon thread
+# tự die theo — không cần graceful shutdown handler.
+
 def _run_rq_worker() -> None:
     """
-    Chạy RQ SimpleWorker trong daemon thread để xử lý queue 'gemini_jobs'.
-
-    Dùng SimpleWorker thay Worker vì:
-    - Worker dùng signal.signal() để catch SIGTERM/SIGINT — chỉ hoạt động
-      trên main thread. Khi chạy trong daemon thread sẽ raise:
-      "ValueError: signal only works in main thread of the main interpreter"
-    - SimpleWorker bỏ qua signal handling hoàn toàn → thread-safe.
-    - Job timeout, retry logic (Retry object) vẫn hoạt động bình thường.
-    - ssl_cert_reqs=None: bypass TLS cert check cho Upstash (rediss://).
+    Chạy ThreadSafeWorker (SimpleWorker subclass) trong daemon thread.
+    ThreadSafeWorker.setup_signal_handlers() là no-op → không raise ValueError.
+    Job timeout (900s) và retry logic vẫn hoạt động bình thường.
+    ssl_cert_reqs=None: bypass TLS cert check cho Upstash rediss:// URL.
     """
     import os
     try:
         from redis import Redis
-        from rq import SimpleWorker, Queue  # SimpleWorker: no signal handlers
+        from rq import SimpleWorker, Queue
+
+        # ── ThreadSafeWorker: override signal setup thành no-op ──────────────
+        class ThreadSafeWorker(SimpleWorker):
+            def setup_signal_handlers(self) -> None:
+                """
+                No-op: signal.signal() chỉ hoạt động trên main thread.
+                Daemon thread tự die khi uvicorn process thoát (SIGTERM → main).
+                Không cần graceful shutdown handler trong thread context.
+                """
+                pass
+        # ─────────────────────────────────────────────────────────────────────
 
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         logger.info("[Worker] Đang kết nối Redis: %s", redis_url[:40] + "...")
 
-        # ssl_cert_reqs=None cần thiết khi dùng Upstash TLS (rediss://)
         conn = Redis.from_url(redis_url, ssl_cert_reqs=None)
         conn.ping()
         logger.info("[Worker] ✅ Redis connected")
 
         queue = Queue("gemini_jobs", connection=conn, default_timeout=900)
-        # SimpleWorker: không đăng ký signal handlers → hoạt động được trong thread
-        worker = SimpleWorker([queue], connection=conn)
+        worker = ThreadSafeWorker([queue], connection=conn)
 
-        logger.info("[Worker] 🚀 Lắng nghe queue 'gemini_jobs' (SimpleWorker)...")
-        # burst=False: chạy liên tục, không thoát khi queue trống
-        # with_scheduler không hỗ trợ trong SimpleWorker — retries vẫn OK
+        logger.info("[Worker] 🚀 Lắng nghe queue 'gemini_jobs' (ThreadSafeWorker)...")
         worker.work(burst=False)
 
     except Exception as exc:
-        # Worker lỗi không được crash FastAPI — chỉ log cảnh báo
         logger.error("[Worker] ❌ Worker thread gặp lỗi, dừng lại: %s", exc)
 
 
