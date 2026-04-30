@@ -66,6 +66,9 @@ def process_video_with_gemini(video_data: dict):
     url = video_data.get("url", "")
     caption = video_data.get("caption", "")
 
+    # Bóp băng thông nhân tạo để bảo vệ Quota (15 requests/phút)
+    time.sleep(4)
+
     logger.info(f"🚀 Bắt đầu xử lý Gemini cho {video_id}")
     
     # Đảm bảo video đã tồn tại trong DB (nếu Scraper chưa kịp insert)
@@ -210,7 +213,8 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
         # Lỗi hệ thống API → Raise để RQ retry tự động
         # (RQ sẽ re-enqueue job sau interval: 60s → 180s → 600s)
         if "429" in err_msg or "503" in err_msg:
-            logger.warning(f"⏳ Rate limit / service unavailable — RQ sẽ retry tự động.")
+            logger.warning(f"⏳ Rate limit / service unavailable — Tạm dừng worker 60s trước khi thả để RQ retry.")
+            time.sleep(60)
             raise  # Re-raise để RQ bắt được
         elif "timeout" in err_msg or "runtimeerror" in err_msg or "500" in err_msg:
             logger.info("📡 Lỗi hệ thống → Kích hoạt Fallback sang Modal.")
