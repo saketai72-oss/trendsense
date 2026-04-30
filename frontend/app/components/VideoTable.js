@@ -1,5 +1,5 @@
 "use client";
-
+import Link from "next/link";
 export default function VideoTable({ videos, sortBy, sortOrder, onSort }) {
   const columns = [
     { key: "index", label: "#", sortable: false, align: "left", width: "4%" },
@@ -126,7 +126,7 @@ export default function VideoTable({ videos, sortBy, sortOrder, onSort }) {
                     </span>
                   </td>
                   <td style={{ padding: "12px 12px", textAlign: "center", minWidth: "110px", width: columns[7].width }}>
-                    <a href={`/video/${video.video_id}`}
+                    <Link href={`/video/${video.video_id}`}
                       className="text-xs font-semibold px-3 py-1.5 rounded-lg no-underline transition-all inline-block whitespace-nowrap"
                       style={{
                         background: "rgba(220, 38, 38, 0.08)",
@@ -144,7 +144,7 @@ export default function VideoTable({ videos, sortBy, sortOrder, onSort }) {
                         e.target.style.boxShadow = "none";
                       }}>
                       Chi tiết →
-                    </a>
+                    </Link>
                   </td>
                 </tr>
               );

@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Navbar from "../../components/Navbar";
 import Footer from "../../components/Footer";
-import { checkAnalysis } from "../../lib/api";
+import { getVideo } from "../../lib/api";
 
 export default function VideoDetailPage() {
   const params = useParams();
@@ -14,7 +14,7 @@ export default function VideoDetailPage() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await checkAnalysis(videoId);
+        const res = await getVideo(videoId);
         setData(res);
       } catch (err) {
         console.error(err);
@@ -25,7 +25,7 @@ export default function VideoDetailPage() {
     if (videoId) load();
   }, [videoId]);
 
-  const video = data?.video;
+  const video = data;
 
   const getViralColor = (pct) => {
     if (pct >= 70) return "var(--accent-red)";
