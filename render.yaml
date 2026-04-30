@@ -22,9 +22,10 @@ services:
     ## $PORT do Render inject — KHÔNG hardcode 8080
     startCommand: python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 
-    ## ── Health Check ──────────────────────────────────────────────────────
-    ## Render dùng để biết service đã sẵn sàng chưa
-    healthCheckPath: /
+    ## ── Health Check ──────────────────────────────────────────────────────────
+    ## Render dùng GET /health để verify service đã sẵn sàng
+    ## /health trả {"status":"ok"} tức thì, không query DB
+    healthCheckPath: /health
 
     ## ── Environment Variables ─────────────────────────────────────────────
     ## sync: false → không đồng bộ tự động, phải set tay trong Dashboard

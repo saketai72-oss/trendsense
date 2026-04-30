@@ -29,18 +29,20 @@ logger = logging.getLogger("trendsense.main")
 # ── RQ Worker In-Process (Render Free Tier Workaround) ────────────────────────
 def _run_rq_worker() -> None:
     """
-    Chạy RQ Worker trong daemon thread để xử lý queue 'gemini_jobs'.
+    Chạy RQ SimpleWorker trong daemon thread để xử lý queue 'gemini_jobs'.
 
-    - Daemon thread: tự die khi main process (uvicorn) dừng — không leak.
+    Dùng SimpleWorker thay Worker vì:
+    - Worker dùng signal.signal() để catch SIGTERM/SIGINT — chỉ hoạt động
+      trên main thread. Khi chạy trong daemon thread sẽ raise:
+      "ValueError: signal only works in main thread of the main interpreter"
+    - SimpleWorker bỏ qua signal handling hoàn toàn → thread-safe.
+    - Job timeout, retry logic (Retry object) vẫn hoạt động bình thường.
     - ssl_cert_reqs=None: bypass TLS cert check cho Upstash (rediss://).
-    - Job timeout: 900s (15 phút) — đủ cho yt-dlp + Gemini polling + DB write.
-    - Job vẫn tồn tại trên Upstash Redis nếu container restart → worker
-      tự kéo về và xử lý tiếp khi thức dậy.
     """
     import os
     try:
         from redis import Redis
-        from rq import Worker, Queue
+        from rq import SimpleWorker, Queue  # SimpleWorker: no signal handlers
 
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         logger.info("[Worker] Đang kết nối Redis: %s", redis_url[:40] + "...")
@@ -51,11 +53,13 @@ def _run_rq_worker() -> None:
         logger.info("[Worker] ✅ Redis connected")
 
         queue = Queue("gemini_jobs", connection=conn, default_timeout=900)
-        worker = Worker([queue], connection=conn)
+        # SimpleWorker: không đăng ký signal handlers → hoạt động được trong thread
+        worker = SimpleWorker([queue], connection=conn)
 
-        logger.info("[Worker] 🚀 Lắng nghe queue 'gemini_jobs'...")
-        # with_scheduler=True: cho phép RQ Scheduler chạy retry có delay
-        worker.work(with_scheduler=True)
+        logger.info("[Worker] 🚀 Lắng nghe queue 'gemini_jobs' (SimpleWorker)...")
+        # burst=False: chạy liên tục, không thoát khi queue trống
+        # with_scheduler không hỗ trợ trong SimpleWorker — retries vẫn OK
+        worker.work(burst=False)
 
     except Exception as exc:
         # Worker lỗi không được crash FastAPI — chỉ log cảnh báo
