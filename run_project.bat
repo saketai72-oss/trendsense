@@ -1,6 +1,7 @@
 @echo off
 if "%1"=="backend" goto backend
 if "%1"=="frontend" goto frontend
+if "%1"=="worker" goto worker
 
 SETLOCAL
 TITLE TrendSense - Fullstack Starter
@@ -16,12 +17,16 @@ echo ===================================================
 echo [*] Launching FastAPI Backend on port 8080...
 start "TrendSense-Backend" "%~dpnx0" backend
 
+echo [*] Launching Redis RQ Worker...
+start "TrendSense-Worker" "%~dpnx0" worker
+
 echo [*] Launching Next.js Frontend on port 3000...
 start "TrendSense-Frontend" "%~dpnx0" frontend
 
 echo.
-echo [OK] Both servers are starting.
+echo [OK] All servers are starting.
 echo    - Backend: http://127.0.0.1:8080/docs
+echo    - Worker: Running in background
 echo    - Frontend: http://localhost:3000
 echo.
 echo Press any key to close this launcher.
@@ -53,6 +58,22 @@ npm run dev
 if %ERRORLEVEL% neq 0 (
     echo.
     echo [ERROR] Frontend failed to start.
+    pause
+)
+cmd /k
+exit /b
+
+:worker
+:: Worker logic
+title TrendSense-Worker
+cd /d "%~dp0"
+set PYTHONPATH=%cd%
+call venv\Scripts\activate.bat
+echo STARTING REDIS RQ WORKER...
+python -m backend.worker
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [ERROR] Worker failed to start.
     pause
 )
 cmd /k

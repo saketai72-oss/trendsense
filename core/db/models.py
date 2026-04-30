@@ -367,7 +367,8 @@ def reset_all_analysis_status():
 def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
                             categories: list = None, sentiment: str = None,
                             search: str = None, sort_by: str = "viral_probability",
-                            sort_order: str = "desc", min_viral: float = 0):
+                            sort_order: str = "desc", min_viral: float = 0,
+                            semantic_video_ids: list = None):
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -380,7 +381,14 @@ def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
             if sentiment:
                 where_clauses.append("video_sentiment = %s")
                 params.append(sentiment)
-            if search:
+            if semantic_video_ids is not None:
+                if len(semantic_video_ids) == 0:
+                    # Semantic search yielded no results
+                    where_clauses.append("1=0")
+                else:
+                    where_clauses.append("video_id = ANY(%s)")
+                    params.append(semantic_video_ids)
+            elif search:
                 where_clauses.append("(caption ILIKE %s OR video_description ILIKE %s OR top_keywords ILIKE %s)")
                 like = f"%{search}%"
                 params.extend([like, like, like])

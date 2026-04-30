@@ -3,7 +3,6 @@ import time
 import json
 import logging
 import requests
-from fastapi import BackgroundTasks
 from google import genai
 from google.genai import types
 from core.config import service_settings as settings
@@ -193,13 +192,28 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
         update_ai_results(video_id, final_data)
         logger.info(f"✅ Hoàn thành luồng Gemini cho video {video_id}")
 
+        # Sinh embedding cho semantic search (Ollama local, bỏ qua nếu offline)
+        try:
+            from backend.api.embedding_service import update_video_embedding
+            update_video_embedding(
+                video_id,
+                transcript=final_data.get("audio_transcript", ""),
+                description=final_data.get("video_description", ""),
+            )
+        except Exception as emb_err:
+            logger.warning(f"[Embed] Bỏ qua embedding: {emb_err}")
+
     except Exception as e:
         logger.error(f"❌ Lỗi luồng Gemini ({video_id}): {e}")
         err_msg = str(e).lower()
-        
-        # Chỉ Fallback nếu là lỗi hệ thống (Timeout, RuntimeError, API Limit)
-        if "timeout" in err_msg or "runtimeerror" in err_msg or "429" in err_msg or "503" in err_msg or "500" in err_msg:
-            logger.info("📡 Phát hiện lỗi hệ thống API -> Kích hoạt Fallback sang Modal.")
+
+        # Lỗi hệ thống API → Raise để RQ retry tự động
+        # (RQ sẽ re-enqueue job sau interval: 60s → 180s → 600s)
+        if "429" in err_msg or "503" in err_msg:
+            logger.warning(f"⏳ Rate limit / service unavailable — RQ sẽ retry tự động.")
+            raise  # Re-raise để RQ bắt được
+        elif "timeout" in err_msg or "runtimeerror" in err_msg or "500" in err_msg:
+            logger.info("📡 Lỗi hệ thống → Kích hoạt Fallback sang Modal.")
             _trigger_modal_fallback(video_data)
         else:
             _fallback_error_db(video_id, f"Lỗi Gemini: {str(e)[:50]}")

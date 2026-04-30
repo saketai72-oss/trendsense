@@ -16,7 +16,7 @@ except ImportError:
     sys.exit(1)
 
 from core.config import service_settings as settings
-from services.tiktok_scraper.browser import init_driver
+from services.tiktok_scraper.browser import init_driver, get_random_proxy, is_blocked
 from core.db.session import get_connection
 from core.db.models import extract_video_id, mark_as_scraped, insert_video_metadata
 from services.tiktok_scraper.link_crawler import get_trending_links
@@ -86,8 +86,8 @@ def _trigger_ai_pipeline(video_id, url, video_data, top_comments):
 
 
 def main():
-    # init_db is handled externally or no longer explicitly called here
-    driver = init_driver()
+    proxy = get_random_proxy()
+    driver = init_driver(proxy=proxy)
     try:
         # TĂNG TỶ LỆ VIDEO VIỆT NAM (Tránh lỗi do bắt IP quốc tế)
         vn_tags = ["xuhuong", "xuhuongtiktok", "giaitri", "vietnam", "tintuc", "haihuoc"]
@@ -97,6 +97,12 @@ def main():
         driver.get(url)
         print(f"👉 Đang tải TikTok hashtag: #{target_tag} (Đảm bảo content Việt)...")
         time.sleep(5)  # Giảm từ 8s → 5s (headless eager load nhanh hơn)
+        
+        if is_blocked(driver):
+            print(f"[!] Bị block ngay tại trang hashtag. Hãy thử thay proxy khác.")
+            driver.quit()
+            sys.exit(1)
+            
     except Exception as e:
         print(f"[!] Lỗi khi tải trang hashtag (Timeout?): {e}")
 
@@ -120,6 +126,11 @@ def main():
         try:
             driver.get(link)
             time.sleep(2.5)  # Giảm từ 4s → 2.5s (eager strategy đã tải DOM xong)
+            
+            if is_blocked(driver):
+                print(f"  [🚫] Trình duyệt bị block! Proxy hiện tại đã bị phát hiện. Cần xoay vòng proxy.")
+                break # Dừng vòng lặp để lần chạy sau dùng proxy khác
+                
         except Exception as e:
             print(f"  [!] Gặp lỗi khi truy cập link (Timeout video này): {e} -> Bỏ qua.")
             continue

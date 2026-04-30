@@ -8,3 +8,10 @@ groq
 requests==2.33.0
 google-genai
 yt-dlp
+# --- Infrastructure Upgrades ---
+slowapi          # Rate limiting cho FastAPI
+redis            # Redis client (Upstash)
+rq               # Redis Queue — thay thế BackgroundTasks
+httpx            # Async HTTP client cho Storage download
+supabase         # Supabase Python SDK (Storage + Auth)
+openai           # OpenAI-compatible client (dùng cho OpenRouter)

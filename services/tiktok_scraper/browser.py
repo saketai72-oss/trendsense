@@ -1,9 +1,11 @@
 import undetected_chromedriver as uc
 import os
 import re
+import json
+import random
 import platform
 
-# Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" và [WinError 6] The handle is invalid trên Windows
+# Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" trên Windows
 if hasattr(uc.Chrome, '__del__'):
     _original_del = uc.Chrome.__del__
     def _safe_del(self):
@@ -13,19 +15,85 @@ if hasattr(uc.Chrome, '__del__'):
             pass
     uc.Chrome.__del__ = _safe_del
 
+
+# ── Proxy Pool ────────────────────────────────────────────────────
+def _load_proxy_pool() -> list:
+    """
+    Đọc danh sách proxy từ biến môi trường PROXY_LIST.
+    Hỗ trợ 2 định dạng:
+      - JSON array: '["http://user:pass@host:port", ...]'
+      - Comma-separated: "http://user:pass@host1:port,http://user:pass@host2:port"
+    Trả về list rỗng nếu không có cấu hình (scraper chạy không proxy).
+    """
+    raw = os.environ.get("PROXY_LIST", "").strip()
+    if not raw:
+        return []
+    try:
+        pool = json.loads(raw)
+        if isinstance(pool, list):
+            return [p.strip() for p in pool if p.strip()]
+    except json.JSONDecodeError:
+        pass
+    # Fallback: comma-separated
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def get_random_proxy() -> str | None:
+    """Chọn ngẫu nhiên 1 proxy từ pool. Trả về None nếu pool rỗng."""
+    pool = _load_proxy_pool()
+    if not pool:
+        return None
+    return random.choice(pool)
+
+
+# ── Block Detection ────────────────────────────────────────────────
+BLOCK_SIGNALS = [
+    "robot", "captcha", "unusual traffic", "403", "access denied",
+    "verify you are human", "security check", "just a moment",
+    "enable javascript", "tiktok.com/login",  # redirect to login = block
+]
+
+
+def is_blocked(driver) -> bool:
+    """
+    Kiểm tra xem TikTok có đang block trình duyệt không.
+    Trả về True nếu phát hiện block signal trong title hoặc body.
+    """
+    try:
+        page_title = (driver.title or "").lower()
+        # Kiểm tra title trước (nhanh)
+        for signal in BLOCK_SIGNALS:
+            if signal in page_title:
+                print(f"[🚫 BLOCK] Phát hiện tín hiệu block trong title: '{page_title}'")
+                return True
+
+        # Kiểm tra body text (chậm hơn nhưng chắc chắn hơn)
+        try:
+            body_text = driver.find_element("tag name", "body").text.lower()[:500]
+            for signal in ["captcha", "robot", "unusual traffic", "verify you are human"]:
+                if signal in body_text:
+                    print(f"[🚫 BLOCK] Phát hiện tín hiệu block trong body: '{signal}'")
+                    return True
+        except Exception:
+            pass
+
+        return False
+    except Exception:
+        return False
+
+
+# ── Chrome Version Detection ──────────────────────────────────────
 def get_chrome_version():
     """Radar thông minh: Tự nhận diện hệ điều hành để dò version Chrome"""
     os_name = platform.system()
     try:
         if os_name == 'Linux':
-            # Dò trên máy ảo Github
             output = os.popen('google-chrome --version').read()
             match = re.search(r' (\d+)\.', output)
             if match:
                 return int(match.group(1))
-                
+
         elif os_name == 'Windows':
-            # Dò trong Registry của máy tính cá nhân
             output = os.popen('reg query "HKEY_CURRENT_USER\\Software\\Google\\Chrome\\BLBeacon" /v version').read()
             match = re.search(r'version\s+REG_SZ\s+(\d+)\.', output)
             if match:
@@ -34,27 +102,45 @@ def get_chrome_version():
         print(f"[!] Lỗi radar dò version: {e}")
     return None
 
-def init_driver():
+
+# ── Driver Init ───────────────────────────────────────────────────
+def init_driver(proxy: str | None = None):
+    """
+    Khởi tạo Undetected ChromeDriver.
+
+    Args:
+        proxy: URL proxy dạng "http://user:pass@host:port" hoặc None
+
+    Returns:
+        uc.Chrome instance
+    """
     options = uc.ChromeOptions()
-    
-    # 1. Tối ưu cấu hình ẩn danh (CHỐNG WINERROR 6 & TikTok detection)
-    options.add_argument('--headless=new') 
+
+    # Cấu hình ẩn danh
+    options.add_argument('--headless=new')
     options.add_argument('--window-size=1920,1080')
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')  # KHẮC PHỤC TREO GH ACTIONS (>2 hours hang fix)
+    options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-    options.page_load_strategy = 'eager'  # Không chờ load toàn bộ ảnh/video, chỉ lấy HTML
+    options.page_load_strategy = 'eager'
 
-    # 2. Radar dò tìm phiên bản Chrome để khớp Driver
+    # Gắn proxy nếu có
+    if proxy:
+        options.add_argument(f'--proxy-server={proxy}')
+        print(f"[🔀 PROXY] Đang dùng: {proxy.split('@')[-1] if '@' in proxy else proxy}")
+    else:
+        print("[*] Không có proxy — dùng IP thật (có thể bị block trên GitHub Actions).")
+
+    # Tự nhận diện version Chrome
     v_main = get_chrome_version()
     if v_main:
-        print(f"[*] Radar dò được Chrome phiên bản: {v_main} ({platform.system()})")
+        print(f"[*] Phát hiện Chrome v{v_main} ({platform.system()})")
     else:
-        print("[!] Không dò được version, nhắm mắt tải bừa bản mới nhất...")
+        print("[!] Không dò được Chrome version, dùng bản mới nhất...")
 
-    # 3. Hỗ trợ tìm file Chrome trên Windows (Chống lỗi Binary Location)
+    # Tìm Chrome binary trên Windows
     chrome_path = None
     if platform.system() == 'Windows':
         paths = [
@@ -66,16 +152,14 @@ def init_driver():
                 chrome_path = p
                 break
 
-    # 3. Khởi tạo tàng hình
     driver = uc.Chrome(
         options=options,
         browser_executable_path=chrome_path,
         use_subprocess=True,
-        version_main=v_main
+        version_main=v_main,
     )
-    
-    # Thiết lập timeout để không bao giờ bị kẹt quá thời gian
+
     driver.set_page_load_timeout(60)
     driver.implicitly_wait(10)
-    
-    return driver
+
+    return driver

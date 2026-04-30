@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import { analyzeVideo, checkAnalysis } from "../lib/api";
+import { analyzeVideo, checkAnalysis, getUploadUrl } from "../lib/api";
 import { supabase } from "../lib/supabase";
 
 const STEPS = [
@@ -95,7 +95,24 @@ export default function AnalyzePage() {
     if (!videoFile) { setError("Vui lòng chọn video để phân tích."); return; }
     setError(""); setResult(null); setCurrentStep(0); setLoading(true);
     try {
-      const resp = await analyzeVideo(videoFile, caption);
+      // 1. Get Presigned URL from Backend
+      const { video_id, upload_url, storage_path } = await getUploadUrl(videoFile.name, videoFile.type);
+      
+      // 2. Upload directly to Supabase Storage
+      const uploadRes = await fetch(upload_url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": videoFile.type,
+        },
+        body: videoFile,
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error("Lỗi khi tải video lên hệ thống lưu trữ.");
+      }
+
+      // 3. Trigger Analysis
+      const resp = await analyzeVideo(video_id, storage_path, caption);
       setVideoId(resp.video_id);
       setCurrentStep(1);
     } catch (err) {

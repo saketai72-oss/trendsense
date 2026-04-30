@@ -58,22 +58,23 @@ export async function getTimeline() {
   return fetcher("/timeline");
 }
 
-export async function analyzeVideo(videoFile, caption = "") {
-  const formData = new FormData();
-  formData.append("video", videoFile);
-  formData.append("caption", caption);
-
-  // Bypass Next.js proxy (which has a 10MB body size limit) and call Backend directly
-  const res = await fetch("http://127.0.0.1:8080/api/analyze", {
+export async function getUploadUrl(filename, contentType = "video/mp4") {
+  return fetcher("/upload-url", {
     method: "POST",
-    body: formData,
+    body: JSON.stringify({ filename, content_type: contentType }),
   });
-  
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `API error: ${res.status}`);
-  }
-  return res.json();
+}
+
+export async function analyzeVideo(videoId, storagePath, caption = "") {
+  // Call Backend directly via proxy
+  return fetcher("/analyze", {
+    method: "POST",
+    body: JSON.stringify({
+      video_id: videoId,
+      storage_path: storagePath,
+      caption: caption,
+    }),
+  });
 }
 
 export async function checkAnalysis(videoId) {

@@ -136,29 +136,27 @@ def _get_ocr():
 # HELPER FUNCTIONS
 # ============================================================
 
-def _save_uploaded_video(video_base64: str, video_id: str, filename: str = "upload.mp4"):
-    """Decode base64 video data and save to /tmp. Returns path or None."""
-    import base64
+def _download_video(url: str, video_id: str, is_direct_url: bool = False):
+    """
+    Tải video. Nếu is_direct_url = True (Supabase presigned URL), dùng requests.
+    Nếu False (TikTok URL), dùng yt-dlp.
+    Trả về path hoặc None.
+    """
+    import requests
+    if is_direct_url:
+        out_path = f"/tmp/{video_id}.mp4"
+        try:
+            r = requests.get(url, stream=True, timeout=120)
+            r.raise_for_status()
+            with open(out_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print(f"    [✓] Downloaded from storage: {os.path.basename(out_path)}")
+            return out_path
+        except Exception as e:
+            print(f"    [!] Storage download error: {str(e)[:120]}")
+            return None
 
-    # Determine extension from filename
-    ext = "mp4"
-    if "." in filename:
-        ext = filename.rsplit(".", 1)[-1].lower()
-
-    out_path = f"/tmp/{video_id}.{ext}"
-    try:
-        video_bytes = base64.b64decode(video_base64)
-        with open(out_path, "wb") as f:
-            f.write(video_bytes)
-        print(f"    [✓] Saved uploaded video: {os.path.basename(out_path)} ({len(video_bytes) / 1024 / 1024:.1f} MB)")
-        return out_path
-    except Exception as e:
-        print(f"    [!] Failed to decode uploaded video: {str(e)[:120]}")
-        return None
-
-
-def _download_video(url: str, video_id: str):
-    """Tải video từ TikTok vào /tmp bằng yt-dlp. Trả về path hoặc None."""
     import yt_dlp
     import glob
 
@@ -354,87 +352,124 @@ Lưu ý:
 - positive_score là số nguyên từ 0 đến 100
 - category phải copy chính xác từ danh sách (bao gồm emoji)"""
 
-    client = Groq(api_key=os.environ["GROQ_API_KEY"])
-
-    # Danh sách model theo thứ tự ưu tiên. Nếu Llama 70B hết quota, fallback sang 8B
-    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
-
-    for attempt in range(5): # Tăng lên 5 lần thử
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    
+    # ── OPENROUTER PRIMARY ──
+    if openrouter_key:
         try:
-            # Chọn model: 2 lần đầu dùng 70b, sau đó fallback sang 8b
-            current_model = models[0] if attempt < 2 else (models[1] if attempt < 4 else models[2])
+            from openai import OpenAI
+            client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1")
             
-            response = client.chat.completions.create(
-                model=current_model,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.3,
-                max_tokens=300,
-            )
-            raw = response.choices[0].message.content
-            data = json.loads(raw)
+            openrouter_free_models = [
+                "google/gemini-2.5-flash:free",
+                "meta-llama/llama-3.3-70b-instruct:free",
+                "nvidia/llama-3.1-nemotron-70b-instruct:free",
+                "google/gemma-2-9b-it:free",
+                "mistralai/mistral-nemo:free",
+                "meta-llama/llama-3.1-8b-instruct:free",
+                "qwen/qwen-2.5-72b-instruct:free",
+                "qwen/qwen-2.5-7b-instruct:free",
+                "microsoft/phi-3-mini-128k-instruct:free",
+                "meta-llama/llama-3-8b-instruct:free"
+            ]
 
-            # --- Validate & normalize category ---
-            cat = data.get("category", "🌍 Khác")
-            matched = "🌍 Khác"
-            for std in STANDARD_CATEGORIES:
-                if std.lower() == cat.lower():
-                    matched = std
-                    break
-                # Fuzzy match: bỏ emoji, so sánh tên
-                if " " in std and std.split(" ", 1)[-1].lower() in cat.lower():
-                    matched = std
-                    break
-            data["category"] = matched
+            openrouter_success = False
+            for selected_model in openrouter_free_models:
+                for attempt in range(2): # Thử tối đa 2 lần cho mỗi model
+                    try:
+                        response = client.chat.completions.create(
+                            model=selected_model,
+                            messages=[{"role": "user", "content": prompt}],
+                            response_format={"type": "json_object"},
+                            temperature=0.3,
+                            max_tokens=300,
+                        )
+                        raw = response.choices[0].message.content
+                        data = json.loads(raw)
+                        return _normalize_groq_result(data)
+                    except Exception as e:
+                        if "429" in str(e) and attempt == 0:
+                            time.sleep(2)
+                            continue
+                        break # Bỏ qua model này nếu lỗi khác hoặc đã thử 2 lần
+                # Tiếp tục vòng lặp model bên ngoài nếu break
+        except Exception:
+            pass
 
-            # --- Validate sentiment ---
-            sentiment = data.get("sentiment", "🟡 TRUNG LẬP")
-            if "TÍCH CỰC" in sentiment.upper():
-                data["sentiment"] = "🟢 TÍCH CỰC"
-            elif "TIÊU CỰC" in sentiment.upper():
-                data["sentiment"] = "🔴 TIÊU CỰC"
-            else:
-                data["sentiment"] = "🟡 TRUNG LẬP"
-
-            # --- Validate positive_score ---
+    # ── GROQ FALLBACK ──
+    if groq_key:
+        client = Groq(api_key=groq_key)
+        models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
+        for attempt in range(4):
             try:
-                score = float(data.get("positive_score", 50))
-                data["positive_score"] = max(0.0, min(100.0, score))
-            except (ValueError, TypeError):
-                data["positive_score"] = 50.0
+                current_model = models[0] if attempt < 2 else models[1]
+                response = client.chat.completions.create(
+                    model=current_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.3,
+                    max_tokens=300,
+                )
+                raw = response.choices[0].message.content
+                data = json.loads(raw)
+                return _normalize_groq_result(data)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "429" in err_str and attempt < 3:
+                    time.sleep(10 + attempt*5)
+                    continue
+                elif "400" in err_str or "context_length" in err_str:
+                    prompt = prompt[:len(prompt)//2] + "\n... (Dữ liệu đã cắt bớt) ... BẮT BUỘC TRẢ VỀ JSON"
+                else:
+                    break
+                    
+    # Fallback hoàn toàn
+    return _normalize_groq_result({})
 
-            # --- Validate keywords ---
-            kws = data.get("keywords", [])
-            if not isinstance(kws, list):
-                kws = []
-            data["keywords"] = [str(k) for k in kws[:5]]
+def _normalize_groq_result(data: dict) -> dict:
+    """Chuẩn hóa dữ liệu trả về từ LLM."""
 
-            return data
+    # --- Validate & normalize category ---
+    cat = data.get("category", "🌍 Khác")
+    matched = "🌍 Khác"
+    for std in STANDARD_CATEGORIES:
+        if std.lower() == cat.lower():
+            matched = std
+            break
+        # Fuzzy match: bỏ emoji, so sánh tên
+        if " " in std and std.split(" ", 1)[-1].lower() in cat.lower():
+            matched = std
+            break
+    data["category"] = matched
 
-        except Exception as e:
-            err_str = str(e).lower()
-            if ("rate_limit" in err_str or "429" in err_str) and attempt < 4:
-                import random
-                wait = 10 + (attempt * 6) + random.uniform(1, 4)  # Đợi 11-14s, 17-20s, 23-26s...
-                print(f"    ⏳ Groq Rate Limit (429) → chờ {wait:.1f}s (retry {attempt + 1}/5, next model: {models[0] if attempt + 1 < 2 else models[1]})...")
-                time.sleep(wait)
-            elif "400" in err_str or "context_length" in err_str:
-                print(f"    [!] Groq 400 Bad Request (có thể do text quá dài): {str(e)[:120]}")
-                # Nếu text vẫn quá dài, rút gọn thêm nữa cho lần retry sau
-                prompt = prompt[:len(prompt)//2] + "\n\n... (Dữ liệu đã bị cắt bớt do quá dài) ... BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON"
-            else:
-                print(f"    [!] Groq error: {str(e)[:120]}")
-                break
+    # --- Validate sentiment ---
+    sentiment = data.get("sentiment", "🟡 TRUNG LẬP")
+    if "TÍCH CỰC" in sentiment.upper():
+        data["sentiment"] = "🟢 TÍCH CỰC"
+    elif "TIÊU CỰC" in sentiment.upper():
+        data["sentiment"] = "🔴 TIÊU CỰC"
+    else:
+        data["sentiment"] = "🟡 TRUNG LẬP"
 
-    # Fallback nếu Groq thất bại hoàn toàn
-    return {
-        "summary": "Lỗi khi gọi Groq AI tổng hợp.",
-        "category": "🌍 Khác",
-        "sentiment": "🟡 TRUNG LẬP",
-        "positive_score": 50.0,
-        "keywords": [],
-        "ai_status": "error",
-    }
+    # --- Validate positive_score ---
+    try:
+        score = float(data.get("positive_score", 50))
+        data["positive_score"] = max(0.0, min(100.0, score))
+    except (ValueError, TypeError):
+        data["positive_score"] = 50.0
+
+    # --- Validate keywords ---
+    kws = data.get("keywords", [])
+    if not isinstance(kws, list):
+        kws = []
+    data["keywords"] = [str(k) for k in kws[:5]]
+
+    if not data.get("summary"):
+        data["summary"] = "Lỗi khi gọi LLM AI tổng hợp."
+        data["ai_status"] = "error"
+
+    return data
 
 
 def _calculate_metrics(video_data):
@@ -1007,18 +1042,18 @@ def process_video(video_data: dict):
     print(f"🎬 MODAL AI WORKER — Processing: {video_id}")
     print(f"{'=' * 60}")
 
-    # ── BƯỚC 1: Lấy video (Upload base64 hoặc Download từ URL) ──
-    video_base64 = video_data.get("video_base64", "")
+    # ── BƯỚC 1: Lấy video (Download từ Supabase storage_url hoặc TikTok URL) ──
+    storage_url = video_data.get("storage_url", "")
     video_filename = video_data.get("video_filename", "upload.mp4")
 
-    if video_base64:
-        print("  [1/5] 📂 Decoding uploaded video...")
+    if storage_url:
+        print("  [1/5] 📂 Downloading video from Supabase presigned URL...")
         _update_status(video_id, "downloading")
-        video_path = _save_uploaded_video(video_base64, video_id, video_filename)
+        video_path = _download_video(storage_url, video_id, is_direct_url=True)
     else:
-        print("  [1/5] 📥 Downloading video from URL...")
+        print("  [1/5] 📥 Downloading video from TikTok URL...")
         _update_status(video_id, "downloading")
-        video_path = _download_video(url, video_id)
+        video_path = _download_video(url, video_id, is_direct_url=False)
 
     if not video_path:
         _update_supabase(video_id, {
@@ -1077,7 +1112,7 @@ def process_video(video_data: dict):
                 groq_result["category"] = "Lỗi"
 
         # ── BƯỚC 5: Phân nhánh theo loại video ──
-        is_upload = bool(video_data.get("video_base64", ""))
+        is_upload = bool(video_data.get("storage_url", ""))
 
         if is_upload:
             print("  [5/6] 📐 Extracting video metadata...")
