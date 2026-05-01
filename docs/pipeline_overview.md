@@ -117,9 +117,10 @@ Hai luồng xử lý song song, ưu tiên theo thứ tự:
   11. **Sinh Semantic Embeddings:** `embedding_service.update_video_embedding()` (non-blocking, errors swallowed). Sử dụng Gemini `text-embedding-004` → vector 768 chiều.
   12. **Dọn dẹp:** Xóa file trên Gemini File API.
 - **Error handling:**
-  - 429/503 → sleep 60s rồi re-raise (RQ retry với backoff).
-  - Timeout/500/RuntimeError → `_trigger_modal_fallback()`.
-  - Tất cả lỗi khác → `_fallback_error_db()` ghi error status vào DB.
+  - 429 `RESOURCE_EXHAUSTED` (daily quota) → `_trigger_modal_fallback()` ngay (retry vô nghĩa khi quota đã hết).
+  - 429/503 temporary rate limit → sleep 60s rồi re-raise (RQ retry với backoff: 60s→180s→600s).
+  - Timeout/500/RuntimeError/IP blocked → `_trigger_modal_fallback()`.
+  - Nếu Modal fallback cũng fail (không có URL / Modal down) → `_fallback_error_db()` ghi `ai_status='error'`.
 
 ### B. Pipeline Modal Serverless GPU — Fallback & Upload
 - **File:** `services/ai_engine/modal_app.py` (1232 lines — file lớn nhất project)
