@@ -138,8 +138,9 @@ Hai luồng xử lý song song, ưu tiên theo thứ tự:
 | 3c | Screen Text | `EasyOCR` (vi+en, GPU) |
 | 4 | Tổng hợp tất cả → JSON | **OpenRouter** (10 free models, thử tuần tự) → **Groq** fallback |
 | 5 | Cleanup: giải phóng GPU memory (`gc.collect()`, xóa model singletons) | |
-| 6a | **Scraper video:** Tính metrics → Lưu Supabase | `_calculate_metrics()` + `_update_supabase()` |
-| 6b | **Upload video:** Trích xuất metadata + Trend Alignment | `_extract_video_metadata()` + `_score_trend_alignment()` + `_generate_trend_insights()` |
+| 6 | Sinh Semantic Embeddings | Gemini `text-embedding-004` → pgvector (non-blocking) |
+| 7a | **Scraper video:** Tính metrics → Lưu Supabase | `_calculate_metrics()` + `_update_supabase()` |
+| 7b | **Upload video:** Trích xuất metadata + Trend Alignment | `_extract_video_metadata()` + `_score_trend_alignment()` + `_generate_trend_insights()` |
 
 **LLM fallback chain trong Modal (`_call_groq()`):**
 1. **OpenRouter** (primary, thử 10 free models, mỗi model 2 attempts):

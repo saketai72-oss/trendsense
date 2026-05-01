@@ -5,7 +5,7 @@ Pipeline: POST → Download Video → Whisper + BLIP + EasyOCR (GPU) → Groq AI
 
 Triển khai:
   pip install modal
-  modal secret create trendsense-secrets GROQ_API_KEY=gsk_xxx DATABASE_URL=postgresql://xxx
+  modal secret create trendsense-secrets GROQ_API_KEY=gsk_xxx DATABASE_URL=postgresql://xxx GEMINI_API_KEY=xxx OPENROUTER_API_KEY=xxx
   modal deploy services/ai_engine/modal_app.py
 
 Sau khi deploy, ghi lại URL webhook (dạng https://xxx--trendsense-ai-analyze.modal.run)
@@ -39,6 +39,8 @@ gpu_image = (
     # Layer 2: Thư viện NHẸ (xử lý video & API)
     .pip_install(
         "groq",
+        "openai",
+        "google-genai",
         "yt-dlp",
         "moviepy",
         "opencv-python-headless",
@@ -502,6 +504,48 @@ def _calculate_metrics(video_data):
     velocity = round((vph * er) / math.log10(age_h + 10), 2)
 
     return {"vph": vph, "er": er, "velocity": velocity}
+
+
+def _generate_embedding(video_id, transcript, description):
+    """Sinh embedding từ transcript + description bằng Gemini API, lưu vào DB."""
+    import psycopg2
+
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not gemini_key:
+        print(f"    [~] Embedding skipped: GEMINI_API_KEY không có trong Modal secrets")
+        return
+
+    combined = " ".join(filter(None, [
+        str(transcript or "").strip(),
+        str(description or "").strip(),
+    ])).strip()
+    if not combined:
+        return
+
+    try:
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
+        response = client.models.embed_content(
+            model="text-embedding-004",
+            contents=combined,
+        )
+        embedding = response.embeddings[0].values
+        vec_str = "[" + ",".join(f"{v:.8f}" for v in embedding) + "]"
+
+        db_url = os.environ["DATABASE_URL"]
+        conn = psycopg2.connect(db_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE videos SET embedding = %s::vector WHERE video_id = %s",
+                    (vec_str, video_id),
+                )
+            conn.commit()
+            print(f"    [✓] Embedding saved: {video_id} (dim={len(embedding)})")
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"    [~] Embedding error: {e}")
 
 
 def _update_supabase(video_id, results):
@@ -1141,6 +1185,7 @@ def process_video(video_data: dict):
             }
 
             _update_supabase_upload(video_id, final)
+            _generate_embedding(video_id, audio_text, final.get("video_description", ""))
 
             # Persist model cache vào Volume (cho lần cold start tiếp theo)
             try:
@@ -1171,6 +1216,7 @@ def process_video(video_data: dict):
             }
 
             _update_supabase(video_id, final)
+            _generate_embedding(video_id, audio_text, final.get("video_description", ""))
 
             # Persist model cache vào Volume (cho lần cold start tiếp theo)
             try:
