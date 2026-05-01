@@ -525,11 +525,26 @@ def _generate_embedding(video_id, transcript, description):
     try:
         from google import genai
         client = genai.Client(api_key=gemini_key)
-        response = client.models.embed_content(
-            model="text-embedding-004",
-            contents=combined,
-        )
-        embedding = response.embeddings[0].values
+
+        # Thử model chính, fallback sang model khác nếu 404
+        embedding = None
+        for model_name in ["gemini-embedding-001", "gemini-embedding-2"]:
+            try:
+                response = client.models.embed_content(
+                    model=model_name,
+                    contents=combined,
+                )
+                embedding = response.embeddings[0].values
+                break
+            except Exception as model_err:
+                if "404" in str(model_err) or "NOT_FOUND" in str(model_err):
+                    print(f"    [~] Model {model_name} không khả dụng, thử model khác...")
+                    continue
+                raise
+
+        if not embedding:
+            print(f"    [~] Không có model embedding nào khả dụng")
+            return
         vec_str = "[" + ",".join(f"{v:.8f}" for v in embedding) + "]"
 
         db_url = os.environ["DATABASE_URL"]

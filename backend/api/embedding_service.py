@@ -1,23 +1,23 @@
 """
-TrendSense — Embedding Service (Google Gemini text-embedding-004)
-===============================================================
+TrendSense — Embedding Service (Google Gemini gemini-embedding-001)
+==================================================================
 100% cloud — không cần service local nào. Miễn phí với hạn mức cao.
-Sinh vector embedding (dim=768) cho transcript + description của video.
-Lưu vào cột `embedding vector(768)` trong bảng `videos` (pgvector).
+Sinh vector embedding (dim=3072) cho transcript + description của video.
+Lưu vào cột `embedding vector(3072)` trong bảng `videos` (pgvector).
 
 Cài pgvector trước trên Supabase:
     CREATE EXTENSION IF NOT EXISTS vector;
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS embedding vector(768);
-    CREATE INDEX IF NOT EXISTS idx_embedding
-        ON videos USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS embedding vector(3072);
+    -- Index: Supabase pgvector giới hạn 2000 dims cho IVFFlat/HNSW.
+    -- Với ~2000 rows, sequential scan đủ nhanh (< 50ms).
 """
 import logging
 from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
-EMBED_MODEL = "text-embedding-004"
-EMBED_DIM = 768
+EMBED_MODEL = "gemini-embedding-001"
+EMBED_DIM = 3072
 
 
 def generate_embedding(text: str) -> Optional[List[float]]:
@@ -25,7 +25,7 @@ def generate_embedding(text: str) -> Optional[List[float]]:
     Gọi Google Gemini API sinh vector cho đoạn text.
 
     Returns:
-        List[float] (dim=768) hoặc None nếu thiếu key / lỗi API
+        List[float] (dim=3072) hoặc None nếu thiếu key / lỗi API
     """
     import os
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
@@ -41,13 +41,25 @@ def generate_embedding(text: str) -> Optional[List[float]]:
         from google import genai
 
         client = genai.Client(api_key=gemini_key)
-        response = client.models.embed_content(
-            model=EMBED_MODEL,
-            contents=text.strip(),
-        )
-        embedding = response.embeddings[0].values
-        logger.debug(f"[Embed] ✅ Sinh embedding (dim={len(embedding)})")
-        return embedding
+
+        # Thử model chính, fallback sang model khác nếu 404
+        for model_name in [EMBED_MODEL, "gemini-embedding-2"]:
+            try:
+                response = client.models.embed_content(
+                    model=model_name,
+                    contents=text.strip(),
+                )
+                embedding = response.embeddings[0].values
+                logger.debug(f"[Embed] ✅ Sinh embedding với {model_name} (dim={len(embedding)})")
+                return embedding
+            except Exception as model_err:
+                if "404" in str(model_err) or "NOT_FOUND" in str(model_err):
+                    logger.warning(f"[Embed] Model {model_name} không khả dụng, thử model khác...")
+                    continue
+                raise
+
+        logger.warning(f"[Embed] Không có model embedding nào khả dụng.")
+        return None
 
     except Exception as e:
         logger.warning(f"[Embed] Lỗi Gemini Embeddings API: {e}")
