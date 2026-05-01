@@ -138,7 +138,7 @@ Hai luồng xử lý song song, ưu tiên theo thứ tự:
 | 3c | Screen Text | `EasyOCR` (vi+en, GPU) |
 | 4 | Tổng hợp tất cả → JSON | **OpenRouter** (10 free models, thử tuần tự) → **Groq** fallback |
 | 5 | Cleanup: giải phóng GPU memory (`gc.collect()`, xóa model singletons) | |
-| 6 | Sinh Semantic Embeddings | Gemini `gemini-embedding-exp-03-07` → pgvector (non-blocking) |
+| 6 | Sinh Semantic Embeddings | Gemini `gemini-embedding-001` (3072-dim) → pgvector (non-blocking) |
 | 7a | **Scraper video:** Tính metrics → Lưu Supabase | `_calculate_metrics()` + `_update_supabase()` |
 | 7b | **Upload video:** Trích xuất metadata + Trend Alignment | `_extract_video_metadata()` + `_score_trend_alignment()` + `_generate_trend_insights()` |
 
@@ -236,7 +236,7 @@ viral_velocity = (views_per_hour × engagement_rate) / log10(age_hours + 10)
 
 ### Semantic Search (`backend/api/embedding_service.py`):
 - **Model:** Google Gemini `gemini-embedding-001` (3072-dim vectors, fallback `gemini-embedding-2`)
-- **Lưu:** Cột `embedding vector(3072)` trong bảng `videos`, IVFFlat index (`vector_cosine_ops`, 100 lists)
+- **Lưu:** Cột `embedding vector(3072)` trong bảng `videos` (không index — Supabase pgvector giới hạn 2000 dims cho IVFFlat/HNSW, sequential scan đủ nhanh với ~2000 rows)
 - **Search:** `semantic_search(query, limit)` → cosine distance `<=>` operator
 - **Integration:** `GET /api/videos?search=...` ưu tiên semantic search, fallback ILIKE nếu fail
 
@@ -246,7 +246,7 @@ viral_velocity = (views_per_hour × engagement_rate) / log10(age_hours + 10)
 
 - **Công nghệ:** Supabase (PostgreSQL) + `psycopg2` (raw SQL, không ORM) — quản lý tại `core/db/`
 - **Kết nối:** `core/db/session.py` → `get_connection()` từ `DATABASE_URL`. Không connection pooling — mỗi function tạo connection mới.
-- **Migration:** `core/db/migrations/001_pgvector.sql` — Enable pgvector extension + thêm cột `embedding vector(3072)` + tạo IVFFlat index. `002_pgvector_upgrade_3072.sql` — Upgrade từ 768 → 3072 nếu đã có column cũ.
+- **Migration:** `core/db/migrations/001_pgvector.sql` — Enable pgvector extension + thêm cột `embedding vector(3072)`. `002_pgvector_upgrade_3072.sql` — Upgrade từ 768 → 3072 nếu đã có column cũ (xóa index cũ, đổi dim, không tạo index mới do 2000 dim limit).
 
 ### Bảng `videos` — Schema chính:
 
@@ -264,7 +264,8 @@ viral_velocity = (views_per_hour × engagement_rate) / log10(age_hours + 10)
 - Lưu `video_id` đã cào để tránh cào lại. `mark_as_scraped()` / `is_scraped()`
 
 ### Indexes:
-- `idx_ai_status`, `idx_scrape_date`, `idx_category`, `idx_is_rescraped`, `idx_videos_embedding` (IVFFlat cosine)
+- `idx_ai_status`, `idx_scrape_date`, `idx_category`, `idx_is_rescraped`
+- `idx_videos_embedding` — **Tạm bỏ**: Supabase pgvector giới hạn 2000 dims cho IVFFlat/HNSW. Sequential scan đủ nhanh (<50ms) với ~2000 rows. Khi Supabase nâng cấp pgvector >= 0.7.0, tạo lại: `CREATE INDEX idx_videos_embedding ON videos USING hnsw (embedding vector_cosine_ops);`
 
 ### Các hàm DB quan trọng (`core/db/models.py`, ~640 lines):
 
@@ -409,7 +410,7 @@ Mục đích: Reset viral_probability về 0 cho video cũ hơn 2 tuần (cho ph
 | `OPENROUTER_API_KEY` | `""` | API Key chính cho text generation (10 free models) |
 | `OPENROUTER_DEFAULT_MODEL` | `meta-llama/llama-3.3-70b-instruct:free` | Default model (dùng khi chỉ định cụ thể) |
 | `GROQ_API_KEY` | `""` | Fallback text generation API |
-| `GEMINI_API_KEY` | `""` | Video analysis (Gemini 2.5 Flash) + Semantic Embeddings (gemini-embedding-exp-03-07) |
+| `GEMINI_API_KEY` | `""` | Video analysis (Gemini 2.5 Flash) + Semantic Embeddings (gemini-embedding-001, 3072-dim) |
 | `MODAL_WEBHOOK_URL` | `""` | URL webhook Modal GPU endpoint |
 | `FRONTEND_URL` | `http://localhost:3000` | CORS origin |
 
@@ -472,7 +473,7 @@ TrendSense/
 │       ├── routes.py              # 11 REST endpoints (mounted at /api)
 │       ├── gemini_engine.py       # Gemini 2.5 Flash video analysis pipeline
 │       ├── llm_client.py          # Unified LLM client (OpenRouter 10 models → Groq)
-│       ├── embedding_service.py   # pgvector semantic search (gemini-embedding-exp-03-07)
+│       ├── embedding_service.py   # pgvector semantic search (gemini-embedding-001, 3072-dim)
 │       ├── storage_service.py     # Supabase Storage presigned URLs
 │       └── rate_limiter.py        # SlowAPI limiter (Redis primary, in-memory fallback)
 ├── core/
@@ -484,7 +485,8 @@ TrendSense/
 │       ├── session.py             # psycopg2 connection factory
 │       ├── models.py              # All DB schema + CRUD + analytics (~640 lines)
 │       └── migrations/
-│           └── 001_pgvector.sql   # pgvector extension + embedding column + IVFFlat index
+│           ├── 001_pgvector.sql          # pgvector extension + embedding column vector(3072)
+│           └── 002_pgvector_upgrade_3072.sql  # Upgrade 768→3072 (drop old index)
 ├── services/
 │   ├── ai_engine/
 │   │   ├── modal_app.py           # Modal serverless GPU (1232 lines, T4/L4)
@@ -534,6 +536,7 @@ TrendSense/
 ├── scripts/
 │   ├── run.py                     # Legacy local runner (outdated paths)
 │   ├── reset_viral_predictions.py # Reset viral_probability for old videos
+│   ├── backfill_embeddings.py     # Backfill embedding cho video completed nhưng thiếu vector
 │   ├── migrate_v2.py              # DB migration scripts
 │   └── ...                        # Other utility scripts
 ├── .github/workflows/
@@ -566,7 +569,7 @@ GitHub Actions (mỗi 4h)
               → gemini-2.5-flash inference → JSON (summary, category, sentiment, keywords)
               → validate category + calculate_metrics()
               → update_ai_results() → Supabase (ai_status=completed)
-              → embedding_service → gemini-embedding-exp-03-07 → pgvector (non-blocking)
+              → embedding_service → gemini-embedding-001 (3072-dim) → pgvector (non-blocking)
               → cleanup Gemini file
               [Nếu fail] → _trigger_modal_fallback()
       [Fallback] POST MODAL_WEBHOOK_URL
