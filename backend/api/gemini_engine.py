@@ -36,22 +36,29 @@ def _delete_gemini_file(file_name):
     except Exception as e:
         logger.error(f"Lỗi khi xoá file trên Gemini {file_name}: {e}")
 
-def _trigger_modal_fallback(video_data: dict):
-    """Fallback gọi sang Modal nếu Gemini gặp sự cố hệ thống (429, 500, Timeout, IP Blocked)."""
+def _trigger_modal_fallback(video_data: dict) -> bool:
+    """Fallback gọi sang Modal nếu Gemini gặp sự cố. Returns True nếu thành công."""
     from core.config.backend_settings import MODAL_WEBHOOK_URL
+    video_id = video_data.get("video_id")
     if not MODAL_WEBHOOK_URL:
-        logger.error("❌ Không có MODAL_WEBHOOK_URL để fallback.")
-        return
-        
-    logger.info(f"🔄 Kích hoạt Fallback sang Modal cho video {video_data.get('video_id')}")
+        logger.error(f"❌ Không có MODAL_WEBHOOK_URL để fallback cho {video_id}.")
+        _fallback_error_db(video_id, "Gemini quota exceeded & no Modal fallback configured")
+        return False
+
+    logger.info(f"🔄 Kích hoạt Fallback sang Modal cho video {video_id}")
     try:
         resp = requests.post(MODAL_WEBHOOK_URL, json=video_data, timeout=15)
         if resp.status_code == 200:
-            logger.info(f"✅ Đã fallback sang Modal thành công.")
+            logger.info(f"✅ Đã fallback sang Modal thành công cho {video_id}.")
+            return True
         else:
             logger.error(f"❌ Modal Fallback lỗi HTTP {resp.status_code}: {resp.text[:80]}")
+            _fallback_error_db(video_id, f"Modal fallback HTTP {resp.status_code}")
+            return False
     except Exception as e:
         logger.error(f"❌ Lỗi kết nối Modal Fallback: {e}")
+        _fallback_error_db(video_id, f"Modal fallback connection error")
+        return False
 
 def process_video_with_gemini(video_data: dict):
     """
@@ -209,18 +216,23 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
     except Exception as e:
         logger.error(f"❌ Lỗi luồng Gemini ({video_id}): {e}")
         err_msg = str(e).lower()
+        is_quota_err = "resource_exhausted" in err_msg or "GenerateRequestsPerDay" in str(e)
 
-        # Lỗi hệ thống API → Raise để RQ retry tự động
-        # (RQ sẽ re-enqueue job sau interval: 60s → 180s → 600s)
-        if "429" in err_msg or "503" in err_msg:
-            logger.warning(f"⏳ Rate limit / service unavailable — Tạm dừng worker 60s trước khi thả để RQ retry.")
+        if is_quota_err:
+            # Daily quota exhausted (free tier 20/ngày) — retry vô nghĩa,
+            # fallback sang Modal ngay lập tức.
+            logger.warning(f"🚫 Gemini daily quota exhausted → Fallback sang Modal.")
+            _trigger_modal_fallback(video_data)
+        elif "429" in err_msg or "503" in err_msg:
+            # Temporary rate limit — sleep rồi re-raise cho RQ retry
+            # (RQ sẽ re-enqueue job sau interval: 60s → 180s → 600s)
+            logger.warning(f"⏳ Rate limit tạm thời — Tạm dừng worker 60s trước khi RQ retry.")
             time.sleep(60)
             raise  # Re-raise để RQ bắt được
-        elif "timeout" in err_msg or "runtimeerror" in err_msg or "500" in err_msg:
+        else:
+            # Lỗi hệ thống (timeout, 500, IP blocked, v.v.) → Modal fallback
             logger.info("📡 Lỗi hệ thống → Kích hoạt Fallback sang Modal.")
             _trigger_modal_fallback(video_data)
-        else:
-            _fallback_error_db(video_id, f"Lỗi Gemini: {str(e)[:50]}")
     
     finally:
         # BƯỚC 8: Xoá file Gemini để giải phóng Quota
