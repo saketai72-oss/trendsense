@@ -136,6 +136,8 @@ def main():
     success = 0
     failed = 0
     skipped = 0
+    consecutive_rate_limit = 0
+    MAX_CONSECUTIVE_429 = 3  # dừng sớm nếu bị 429 liên tiếp (quota daily đã hết)
 
     for i, video in enumerate(videos, 1):
         vid = video["video_id"]
@@ -155,12 +157,24 @@ def main():
             if ok:
                 print("✅")
                 success += 1
+                consecutive_rate_limit = 0  # reset bộ đếm
             else:
                 print("⚠️ skipped (API trả None)")
                 skipped += 1
         except Exception as e:
-            print(f"❌ {e}")
-            failed += 1
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                consecutive_rate_limit += 1
+                print(f"❌ 429 Rate Limit ({consecutive_rate_limit}/{MAX_CONSECUTIVE_429})")
+                failed += 1
+                if consecutive_rate_limit >= MAX_CONSECUTIVE_429:
+                    print(f"\n⛔ Dừng sớm sau {consecutive_rate_limit} lần 429 liên tiếp.")
+                    print("   Quota daily (1000 requests/ngày) đã hết.")
+                    print("   Chạy lại script vào ngày mai — video đã có embedding sẽ tự động được bỏ qua.")
+                    break
+            else:
+                print(f"❌ {e}")
+                failed += 1
 
         # Rate limit: nghỉ giữa mỗi request
         if i < total:
