@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import StatCard from "../components/StatCard";
@@ -42,6 +42,8 @@ export default function DashboardPage() {
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [sentimentFilter, setSentimentFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const searchTimerRef = useRef(null);
   const [minViral, setMinViral] = useState(0);
   const [keywords, setKeywords] = useState([]);
   const [sentiments, setSentiments] = useState([]);
@@ -54,6 +56,16 @@ export default function DashboardPage() {
     if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
     return n.toLocaleString();
   };
+
+  // Debounce search — chỉ gọi API sau khi user ngừng gõ 500ms
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setPage(1);
+    }, 500);
+    return () => clearTimeout(searchTimerRef.current);
+  }, [searchQuery]);
 
   // Load sidebar data once
   useEffect(() => {
@@ -80,7 +92,7 @@ export default function DashboardPage() {
         page, per_page: perPage,
         sort_by: sortBy, sort_order: sortOrder,
         category: selectedCategories.join(","), sentiment: sentimentFilter,
-        search: searchQuery, min_viral: minViral,
+        search: debouncedSearchQuery, min_viral: minViral,
       });
       setVideos(data.videos || []);
       setTotalVideos(data.total || 0);
@@ -90,7 +102,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, perPage, sortBy, sortOrder, selectedCategories, sentimentFilter, searchQuery, minViral]);
+  }, [page, perPage, sortBy, sortOrder, selectedCategories, sentimentFilter, debouncedSearchQuery, minViral]);
 
   useEffect(() => { loadVideos(); }, [loadVideos]);
 
@@ -106,8 +118,10 @@ export default function DashboardPage() {
 
   const handleSearch = (e) => {
     e.preventDefault();
+    // Bypass debounce — tìm ngay khi nhấn Enter
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    setDebouncedSearchQuery(searchQuery);
     setPage(1);
-    loadVideos();
   };
 
   // Sentiment color map
@@ -133,12 +147,12 @@ export default function DashboardPage() {
           {/* Stats Row */}
           {stats && (
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6 mb-12">
-              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>} label="Tổng Video" value={formatBigNumber(stats.total_videos)} delay={0} />
-              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0Z"/><circle cx="12" cy="12" r="3"/></svg>} label="Tổng Views" value={formatBigNumber(stats.total_views)} color="var(--accent-cyan)" delay={50} />
-              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>} label="Tổng Likes" value={formatBigNumber(stats.total_likes)} color="var(--accent-pink)" delay={100} />
-              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>} label="Video Viral" value={stats.viral_count} color="var(--accent-red)" delay={150} />
-              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>} label="Avg Engage" value={(stats.avg_engagement || 0).toFixed(1) + "%"} color="var(--accent-green)" delay={200} />
-              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>} label="Ngày Thu Thập" value={stats.scrape_days} delay={250} />
+              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>} label="Tổng Video" value={formatBigNumber(stats.total_videos)} delay={0} />
+              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0Z" /><circle cx="12" cy="12" r="3" /></svg>} label="Tổng Views" value={formatBigNumber(stats.total_views)} color="var(--accent-cyan)" delay={50} />
+              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></svg>} label="Tổng Likes" value={formatBigNumber(stats.total_likes)} color="var(--accent-pink)" delay={100} />
+              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" /></svg>} label="Video Viral" value={stats.viral_count} color="var(--accent-red)" delay={150} />
+              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" /></svg>} label="Avg Engage" value={(stats.avg_engagement || 0).toFixed(1) + "%"} color="var(--accent-green)" delay={200} />
+              <StatCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2" /><line x1="16" x2="16" y1="2" y2="6" /><line x1="8" x2="8" y1="2" y2="6" /><line x1="3" x2="21" y1="10" y2="10" /></svg>} label="Ngày Thu Thập" value={stats.scrape_days} delay={250} />
             </div>
           )}
 
@@ -148,7 +162,7 @@ export default function DashboardPage() {
               {/* Search */}
               <div className="glass-card p-6">
                 <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
                   TÌM KIẾM
                 </h3>
                 <form onSubmit={handleSearch}>
@@ -165,7 +179,7 @@ export default function DashboardPage() {
               {/* Category Filter */}
               <div className="glass-card p-6">
                 <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.35 2.22 2.02 3 2.02 2.22 0 4.14-1.15 4.14-3.15C9.21 16.9 7.07 17.3 7.07 14.94z"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" /><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.35 2.22 2.02 3 2.02 2.22 0 4.14-1.15 4.14-3.15C9.21 16.9 7.07 17.3 7.07 14.94z" /></svg>
                   DANH MỤC
                 </h3>
                 <div className="flex flex-wrap gap-2">
@@ -211,7 +225,7 @@ export default function DashboardPage() {
               {/* Sentiment Filter */}
               <div className="glass-card p-6">
                 <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
                   CẢM XÚC
                 </h3>
                 <select className="input-dark text-sm"
@@ -229,7 +243,7 @@ export default function DashboardPage() {
               {/* Viral Slider */}
               <div className="glass-card p-6">
                 <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" /></svg>
                   MIN VIRAL %
                 </h3>
                 <input
@@ -247,7 +261,7 @@ export default function DashboardPage() {
               {sentiments.length > 0 && (
                 <div className="glass-card p-6">
                   <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>
                     PHÂN BỔ CẢM XÚC
                   </h3>
                   {sentiments.map((s, i) => {
@@ -278,13 +292,13 @@ export default function DashboardPage() {
               {keywords.length > 0 && (
                 <div className="glass-card p-6">
                   <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" /></svg>
                     TỪ KHÓA HOT
                   </h3>
                   <div className="flex flex-wrap gap-2">
                     {keywords.slice(0, 15).map((kw, i) => (
                       <span key={i} className="keyword-tag cursor-pointer px-3 py-1 rounded-md" style={{ background: "rgba(255,255,255,0.05)" }}
-                        onClick={() => { setSearchQuery(kw.keyword); setPage(1); }}>
+                        onClick={() => { setSearchQuery(kw.keyword); setDebouncedSearchQuery(kw.keyword); setPage(1); }}>
                         {kw.keyword} <span className="opacity-60 ml-0.5 text-[0.65rem]">{kw.count}</span>
                       </span>
                     ))}
@@ -303,10 +317,10 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium" style={{ color: "var(--text-muted)" }}>Số video:</span>
-                    <select 
-                      className="input-dark text-sm" 
-                      style={{ width: "65px", padding: "4px 8px", minHeight: "32px", fontSize: "13px" }} 
-                      value={perPage} 
+                    <select
+                      className="input-dark text-sm"
+                      style={{ width: "65px", padding: "4px 8px", minHeight: "32px", fontSize: "13px" }}
+                      value={perPage}
                       onChange={(e) => { setPerPage(Number(e.target.value)); setPage(1); }}
                     >
                       {[5, 10, 20, 50].map(v => <option key={v} value={v}>{v}</option>)}
@@ -328,7 +342,7 @@ export default function DashboardPage() {
                 <div className="glass-card p-16 text-center">
                   <div className="text-5xl mb-4 opacity-50">🔍</div>
                   <p className="text-lg font-medium" style={{ color: "var(--text-secondary)" }}>Không tìm thấy video nào phù hợp.</p>
-                  <button onClick={() => { setSearchQuery(""); setSelectedCategories([]); setSentimentFilter(""); setMinViral(0); setPage(1); }} className="btn-outline mt-6">
+                  <button onClick={() => { setSearchQuery(""); setDebouncedSearchQuery(""); setSelectedCategories([]); setSentimentFilter(""); setMinViral(0); setPage(1); }} className="btn-outline mt-6">
                     Xóa tất cả bộ lọc
                   </button>
                 </div>

@@ -56,9 +56,9 @@ def list_videos(
 ):
     cat_list = [c.strip() for c in category.split(',')] if category else None
 
-    # Thử semantic search nếu có query
+    # Thử semantic search nếu có query (tối thiểu 2 ký tự để embedding有意义)
     semantic_ids = None
-    if search:
+    if search and len(search.strip()) >= 2:
         try:
             from backend.api.embedding_service import semantic_search
             semantic_ids = semantic_search(search, limit=200)
