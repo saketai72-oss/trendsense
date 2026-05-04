@@ -405,7 +405,13 @@ def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
             total = cur.fetchone()["total"]
 
             offset = (page - 1) * per_page
-            cur.execute(f"SELECT * FROM videos WHERE {where_sql} ORDER BY {sort_by} {order} NULLS LAST LIMIT %s OFFSET %s", params + [per_page, offset])
+            # Khi có semantic search, giữ nguyên thứ tự cosine similarity
+            # thay vì ghi đè bằng sort_by (mặc định viral_probability)
+            if semantic_video_ids is not None and len(semantic_video_ids) > 0:
+                order_clause = "array_position(%s::text[], video_id)"
+                cur.execute(f"SELECT * FROM videos WHERE {where_sql} ORDER BY {order_clause} LIMIT %s OFFSET %s", params + [semantic_video_ids, per_page, offset])
+            else:
+                cur.execute(f"SELECT * FROM videos WHERE {where_sql} ORDER BY {sort_by} {order} NULLS LAST LIMIT %s OFFSET %s", params + [per_page, offset])
             return cur.fetchall(), total
     finally:
         conn.close()

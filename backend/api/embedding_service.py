@@ -168,14 +168,17 @@ def _save_embedding_to_db(video_id: str, embedding: List[float]) -> bool:
         return False
 
 
-def semantic_search(query: str, limit: int = 200) -> Optional[List[str]]:
+def semantic_search(query: str, limit: int = 200, max_distance: float = 0.75) -> Optional[List[str]]:
     """
     Tìm kiếm ngữ nghĩa: sinh embedding từ query → trả về list video_id
     theo thứ tự cosine similarity giảm dần (toán tử <=> của pgvector).
 
     Args:
         query: Chuỗi tìm kiếm từ người dùng
-        limit: Số lượng kết quả tối đa (sẽ được filter thêm bởi get_all_analyzed_videos)
+        limit: Số lượng kết quả tối đa (pre-filter trước khi apply threshold)
+        max_distance: Ngưỡng cosine distance tối đa (0=giống hệt, 2=đối lập).
+                      Mặc định 0.75 (~similarity > 0.25). Giảm xuống 0.6 nếu muốn
+                      kết quả chính xác hơn nhưng ít hơn.
 
     Returns:
         List[str] (video_id theo thứ tự similarity) hoặc None nếu không thể dùng semantic search
@@ -192,7 +195,7 @@ def semantic_search(query: str, limit: int = 200) -> Optional[List[str]]:
                 vec_str = "[" + ",".join(f"{v:.8f}" for v in embedding) + "]"
                 cur.execute(
                     """
-                    SELECT video_id
+                    SELECT video_id, (embedding <=> %s::vector) AS distance
                     FROM videos
                     WHERE embedding IS NOT NULL
                       AND views > 0
@@ -200,11 +203,18 @@ def semantic_search(query: str, limit: int = 200) -> Optional[List[str]]:
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
-                    (vec_str, limit),
+                    (vec_str, vec_str, limit),
                 )
                 rows = cur.fetchall()
-                ids = [row[0] for row in rows]
-                logger.info(f"[Embed] Semantic search '{query[:30]}' → {len(ids)} kết quả")
+                # Lọc theo ngưỡng distance — bỏ video liên quan quá yếu
+                ids = [row[0] for row in rows if row[1] <= max_distance]
+                if rows:
+                    min_d, max_d = rows[0][1], rows[-1][1]
+                    logger.info(
+                        f"[Embed] Semantic search '{query[:30]}' → "
+                        f"{len(ids)}/{len(rows)} kết quả "
+                        f"(distance range: {min_d:.4f}–{max_d:.4f}, threshold={max_distance})"
+                    )
                 return ids
         finally:
             conn.close()
