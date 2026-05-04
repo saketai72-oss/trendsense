@@ -85,22 +85,59 @@ def insert_video_metadata(video_id, data_dict):
             saves = int(data_dict.get('saves', 0))
             create_time = int(data_dict.get('create_time', 0))
 
-            query = '''
-                INSERT INTO videos (
-                    video_id, link, caption, views, likes, comments, shares, saves,
-                    create_time, scrape_date, ai_status,
-                    top1_cmt, top1_likes, top2_cmt, top2_likes,
-                    top3_cmt, top3_likes, top4_cmt, top4_likes,
-                    top5_cmt, top5_likes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (video_id) DO UPDATE SET
-                    views = EXCLUDED.views,
-                    likes = EXCLUDED.likes,
-                    comments = EXCLUDED.comments,
-                    shares = EXCLUDED.shares,
-                    saves = EXCLUDED.saves,
-                    caption = EXCLUDED.caption
-            '''
+            # Kiểm tra xem có bình luận mới hay không
+            has_new_comments = any(
+                str(data_dict.get(f'top{i}_cmt', '')).strip() for i in range(1, 6)
+            )
+
+            if has_new_comments:
+                # Có bình luận mới → cập nhật cả comments và reset ai_status để phân tích lại
+                query = '''
+                    INSERT INTO videos (
+                        video_id, link, caption, views, likes, comments, shares, saves,
+                        create_time, scrape_date, ai_status,
+                        top1_cmt, top1_likes, top2_cmt, top2_likes,
+                        top3_cmt, top3_likes, top4_cmt, top4_likes,
+                        top5_cmt, top5_likes
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (video_id) DO UPDATE SET
+                        views = EXCLUDED.views,
+                        likes = EXCLUDED.likes,
+                        comments = EXCLUDED.comments,
+                        shares = EXCLUDED.shares,
+                        saves = EXCLUDED.saves,
+                        caption = EXCLUDED.caption,
+                        top1_cmt = EXCLUDED.top1_cmt,
+                        top1_likes = EXCLUDED.top1_likes,
+                        top2_cmt = EXCLUDED.top2_cmt,
+                        top2_likes = EXCLUDED.top2_likes,
+                        top3_cmt = EXCLUDED.top3_cmt,
+                        top3_likes = EXCLUDED.top3_likes,
+                        top4_cmt = EXCLUDED.top4_cmt,
+                        top4_likes = EXCLUDED.top4_likes,
+                        top5_cmt = EXCLUDED.top5_cmt,
+                        top5_likes = EXCLUDED.top5_likes,
+                        ai_status = 'pending'
+                '''
+            else:
+                # Không có bình luận mới → chỉ cập nhật stats cơ bản, giữ nguyên comments cũ
+                query = '''
+                    INSERT INTO videos (
+                        video_id, link, caption, views, likes, comments, shares, saves,
+                        create_time, scrape_date, ai_status,
+                        top1_cmt, top1_likes, top2_cmt, top2_likes,
+                        top3_cmt, top3_likes, top4_cmt, top4_likes,
+                        top5_cmt, top5_likes
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (video_id) DO UPDATE SET
+                        views = EXCLUDED.views,
+                        likes = EXCLUDED.likes,
+                        comments = EXCLUDED.comments,
+                        shares = EXCLUDED.shares,
+                        saves = EXCLUDED.saves,
+                        caption = EXCLUDED.caption
+                '''
+
             cursor.execute(query, (
                 video_id, data_dict.get('link', ''), data_dict.get('caption', ''),
                 views, likes, comments, shares, saves, create_time,
@@ -187,7 +224,8 @@ def update_rescraped_stats_only(video_id, data_dict):
 
 def update_rescraped_metadata(video_id, data_dict):
     """
-    Cập nhật data sau khi cào lại, đánh dấu is_rescraped = True
+    Cập nhật data sau khi cào lại, đánh dấu is_rescraped = True.
+    Reset ai_status về 'pending' để pipeline AI phân tích lại.
     """
     conn = get_connection()
     try:
@@ -201,7 +239,8 @@ def update_rescraped_metadata(video_id, data_dict):
                     top2_cmt = %s, top2_likes = %s,
                     top3_cmt = %s, top3_likes = %s,
                     top4_cmt = %s, top4_likes = %s,
-                    top5_cmt = %s, top5_likes = %s
+                    top5_cmt = %s, top5_likes = %s,
+                    ai_status = 'pending'
                 WHERE video_id = %s
             '''
             cursor.execute(query, (
