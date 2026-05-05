@@ -46,7 +46,7 @@ def init_db():
                     is_rescraped BOOLEAN DEFAULT FALSE
                 )
             ''')
-            # Trend Alignment Score columns
+            # Trend Alignment Score columns (kept for backward compat during migration)
             for col_sql in [
                 "ALTER TABLE videos ADD COLUMN IF NOT EXISTS video_duration REAL",
                 "ALTER TABLE videos ADD COLUMN IF NOT EXISTS video_orientation VARCHAR(10)",
@@ -54,15 +54,84 @@ def init_db():
                 "ALTER TABLE videos ADD COLUMN IF NOT EXISTS trend_alignment_score REAL",
                 "ALTER TABLE videos ADD COLUMN IF NOT EXISTS trend_insights JSONB",
                 "ALTER TABLE videos ADD COLUMN IF NOT EXISTS audio_transcript TEXT",
+                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS user_id UUID",
             ]:
                 try:
                     cursor.execute(col_sql)
                 except Exception:
                     pass  # Column may already exist
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_is_rescraped ON videos(is_rescraped)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ai_status ON videos(ai_status)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON videos(category)')
+
+            # ── Users table ──
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255),
+                    display_name VARCHAR(100),
+                    avatar_url TEXT,
+                    auth_provider VARCHAR(20) DEFAULT 'local',
+                    provider_id VARCHAR(255),
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            ''')
+
+            # ── Refresh tokens table ──
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS refresh_tokens (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash VARCHAR(255) UNIQUE NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    revoked BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            ''')
+
+            # ── Video analyses table (upload-specific analysis data) ──
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS video_analyses (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    video_id TEXT UNIQUE NOT NULL,
+                    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                    video_duration REAL,
+                    video_orientation VARCHAR(10),
+                    scene_cut_count INTEGER,
+                    trend_alignment_score REAL,
+                    trend_insights JSONB,
+                    audio_transcript TEXT,
+                    video_description TEXT,
+                    top_keywords TEXT,
+                    video_sentiment TEXT,
+                    positive_score REAL DEFAULT 0,
+                    category TEXT[],
+                    ai_status VARCHAR(20) DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            ''')
+
+            # Indexes
+            for idx_sql in [
+                'CREATE INDEX IF NOT EXISTS idx_is_rescraped ON videos(is_rescraped)',
+                'CREATE INDEX IF NOT EXISTS idx_ai_status ON videos(ai_status)',
+                'CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)',
+                'CREATE INDEX IF NOT EXISTS idx_category ON videos(category)',
+                'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
+                'CREATE INDEX IF NOT EXISTS idx_users_provider ON users(auth_provider, provider_id)',
+                'CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)',
+                'CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash)',
+                'CREATE INDEX IF NOT EXISTS idx_video_analyses_video ON video_analyses(video_id)',
+                'CREATE INDEX IF NOT EXISTS idx_video_analyses_user ON video_analyses(user_id)',
+                'CREATE INDEX IF NOT EXISTS idx_video_analyses_status ON video_analyses(ai_status)',
+                'CREATE INDEX IF NOT EXISTS idx_videos_user ON videos(user_id)',
+            ]:
+                try:
+                    cursor.execute(idx_sql)
+                except Exception:
+                    pass
+
             conn.commit()
     except Exception as e:
         print(f"[ERROR] Failed to init schema: {e}")
@@ -522,11 +591,16 @@ def get_timeline_data():
     finally:
         conn.close()
 
-def insert_user_video(video_id: str, url: str):
+def insert_user_video(video_id: str, url: str, user_id: str = None):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO videos (video_id, link, ai_status, scrape_date, views) VALUES (%s, %s, 'user_pending', CURRENT_DATE, 0) ON CONFLICT (video_id) DO NOTHING", (video_id, url))
+            cur.execute(
+                "INSERT INTO videos (video_id, link, ai_status, scrape_date, views, user_id) "
+                "VALUES (%s, %s, 'user_pending', CURRENT_DATE, 0, %s) "
+                "ON CONFLICT (video_id) DO NOTHING",
+                (video_id, url, user_id)
+            )
             conn.commit()
     except Exception as e:
         conn.rollback()
@@ -641,27 +715,40 @@ def get_viral_audio_transcripts(days=14, limit=30):
 
 
 def update_upload_analysis(video_id, results):
-    """Cập nhật kết quả Trend Alignment Score cho video upload."""
+    """Cập nhật kết quả Trend Alignment Score cho video upload.
+    Writes to video_analyses table (split from videos)."""
     import json
     conn = get_connection()
     try:
         with conn.cursor() as cur:
+            # Upsert into video_analyses
             cur.execute("""
-                UPDATE videos SET
-                    category = %s,
-                    video_description = %s,
-                    top_keywords = %s,
-                    video_sentiment = %s,
-                    positive_score = %s,
-                    video_duration = %s,
-                    video_orientation = %s,
-                    scene_cut_count = %s,
-                    trend_alignment_score = %s,
-                    trend_insights = %s,
-                    audio_transcript = %s,
-                    ai_status = %s
-                WHERE video_id = %s
+                INSERT INTO video_analyses (
+                    video_id, user_id, category, video_description, top_keywords,
+                    video_sentiment, positive_score, video_duration, video_orientation,
+                    scene_cut_count, trend_alignment_score, trend_insights,
+                    audio_transcript, ai_status
+                ) VALUES (
+                    %s,
+                    (SELECT user_id FROM videos WHERE video_id = %s),
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (video_id) DO UPDATE SET
+                    category = EXCLUDED.category,
+                    video_description = EXCLUDED.video_description,
+                    top_keywords = EXCLUDED.top_keywords,
+                    video_sentiment = EXCLUDED.video_sentiment,
+                    positive_score = EXCLUDED.positive_score,
+                    video_duration = EXCLUDED.video_duration,
+                    video_orientation = EXCLUDED.video_orientation,
+                    scene_cut_count = EXCLUDED.scene_cut_count,
+                    trend_alignment_score = EXCLUDED.trend_alignment_score,
+                    trend_insights = EXCLUDED.trend_insights,
+                    audio_transcript = EXCLUDED.audio_transcript,
+                    ai_status = EXCLUDED.ai_status,
+                    updated_at = NOW()
             """, (
+                video_id, video_id,
                 results.get('category', []),
                 results.get('video_description', ''),
                 results.get('top_keywords', ''),
@@ -674,11 +761,243 @@ def update_upload_analysis(video_id, results):
                 json.dumps(results.get('trend_insights', {}), ensure_ascii=False),
                 results.get('audio_transcript', ''),
                 results.get('ai_status', 'completed'),
-                video_id,
             ))
+
+            # Also update ai_status on videos table for Supabase Realtime
+            cur.execute(
+                "UPDATE videos SET ai_status = %s WHERE video_id = %s",
+                (results.get('ai_status', 'completed'), video_id)
+            )
             conn.commit()
     except Exception as e:
         print(f"[ERROR] Failed to update upload analysis for {video_id}: {e}")
         conn.rollback()
+    finally:
+        conn.close()
+
+
+# ==========================================
+# AUTHENTICATION — USER CRUD
+# ==========================================
+
+def create_user(email: str, password_hash: str = None, display_name: str = None,
+                avatar_url: str = None, auth_provider: str = "local",
+                provider_id: str = None):
+    """Create a new user. Returns the user dict or None on failure."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                INSERT INTO users (email, password_hash, display_name, avatar_url,
+                                   auth_provider, provider_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING *
+            """, (email, password_hash, display_name, avatar_url, auth_provider, provider_id))
+            user = cur.fetchone()
+            conn.commit()
+            return dict(user) if user else None
+    except Exception as e:
+        print(f"[ERROR] Failed to create user: {e}")
+        conn.rollback()
+        return None
+    finally:
+        conn.close()
+
+
+def get_user_by_id(user_id: str):
+    """Get user by UUID."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE id = %s AND is_active = TRUE", (user_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_by_email(email: str):
+    """Get user by email address."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_by_provider(provider: str, provider_id: str):
+    """Get user by OAuth provider and provider ID."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM users WHERE auth_provider = %s AND provider_id = %s",
+                (provider, provider_id)
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_user_login(user_id: str):
+    """Update the user's last activity timestamp."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET updated_at = NOW() WHERE id = %s",
+                (user_id,)
+            )
+            conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def link_oauth_provider(user_id: str, provider: str, provider_id: str, avatar_url: str = None):
+    """Link an OAuth provider to an existing user account."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET
+                    auth_provider = %s, provider_id = %s,
+                    avatar_url = COALESCE(%s, avatar_url),
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (provider, provider_id, avatar_url, user_id))
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] Failed to link OAuth provider: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+# ── Refresh Token Management ─────────────────────────────────────────────────
+
+def store_refresh_token(user_id: str, token_hash: str, expires_at):
+    """Store a hashed refresh token in the database."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+                VALUES (%s, %s, %s)
+            """, (user_id, token_hash, expires_at))
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] Failed to store refresh token: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def get_refresh_token(token_hash: str):
+    """Get a refresh token by its hash."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM refresh_tokens WHERE token_hash = %s AND expires_at > NOW()",
+                (token_hash,)
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def revoke_refresh_token(token_hash: str):
+    """Revoke a single refresh token."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE refresh_tokens SET revoked = TRUE WHERE token_hash = %s",
+                (token_hash,)
+            )
+            conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def revoke_all_user_tokens(user_id: str):
+    """Revoke all refresh tokens for a user (logout from all devices)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE refresh_tokens SET revoked = TRUE WHERE user_id = %s AND revoked = FALSE",
+                (user_id,)
+            )
+            conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def cleanup_expired_tokens():
+    """Delete expired and revoked refresh tokens (run periodically)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM refresh_tokens WHERE expires_at < NOW() OR revoked = TRUE"
+            )
+            conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+# ── Video Analyses Queries ───────────────────────────────────────────────────
+
+def get_video_analysis(video_id: str):
+    """Get upload analysis results for a video from video_analyses table."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM video_analyses WHERE video_id = %s", (video_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_videos(user_id: str, page: int = 1, per_page: int = 20):
+    """Get paginated list of videos uploaded by a user with their analysis results."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            offset = (page - 1) * per_page
+            cur.execute("""
+                SELECT v.video_id, v.link, v.caption, v.scrape_date, v.ai_status,
+                       va.trend_alignment_score, va.video_sentiment, va.category,
+                       va.video_description, va.positive_score
+                FROM videos v
+                LEFT JOIN video_analyses va ON v.video_id = va.video_id
+                WHERE v.user_id = %s
+                ORDER BY v.scrape_date DESC
+                LIMIT %s OFFSET %s
+            """, (user_id, per_page, offset))
+            rows = cur.fetchall()
+
+            cur.execute(
+                "SELECT COUNT(*) as total FROM videos WHERE user_id = %s",
+                (user_id,)
+            )
+            total = cur.fetchone()["total"]
+
+            return [dict(r) for r in rows], total
     finally:
         conn.close()
