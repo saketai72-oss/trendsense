@@ -127,7 +127,7 @@ function AnalysisCard({ v, onDelete }) {
           )}
           {v.positive_score != null && (
             <div className="text-center">
-              <ScoreCircle value={v.positive_score} />
+              <ScoreCircle value={v.positive_score / 100} />
               <span className="text-[9px] block mt-0.5" style={{ color: "var(--text-muted)" }}>Positive</span>
             </div>
           )}
@@ -256,14 +256,28 @@ function AnalysisCard({ v, onDelete }) {
           )}
 
           {/* Audio Transcript */}
-          {v.audio_transcript && (
-            <div className="p-4 rounded-xl" style={{ background: "rgba(255,255,255,0.02)" }}>
-              <h4 className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>🎙️ Audio Transcript</h4>
-              <p className="text-sm leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>
-                {v.audio_transcript}
-              </p>
-            </div>
-          )}
+          {(() => {
+            const transcript = v.audio_transcript?.trim();
+            const isUnavailable = !transcript
+              || transcript === "Lỗi trích xuất âm thanh."
+              || transcript === "Không nghe được tiếng."
+              || transcript === "Không có âm thanh."
+              || transcript === "Lỗi trích xuất âm thanh";
+            return (
+              <div className="p-4 rounded-xl" style={{ background: "rgba(255,255,255,0.02)" }}>
+                <h4 className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>🎙️ Audio Transcript</h4>
+                {isUnavailable ? (
+                  <p className="text-sm italic" style={{ color: "var(--text-muted)" }}>
+                    Âm thanh của video này không hỗ trợ phân tích (có thể chỉ có nhạc nền hoặc không có lời thoại).
+                  </p>
+                ) : (
+                  <p className="text-sm leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>
+                    {transcript}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>

@@ -235,7 +235,7 @@ def _run_whisper(video_path):
         clip = VideoFileClip(video_path)
         if clip.audio is None:
             clip.close()
-            return "Không có âm thanh."
+            return ""
 
         fd, mp3_path = tempfile.mkstemp(suffix=".mp3")
         os.close(fd)
@@ -251,11 +251,11 @@ def _run_whisper(video_path):
         model = _get_whisper()
         segments, _ = model.transcribe(mp3_path, beam_size=2)
         text = " ".join(seg.text for seg in segments).strip()
-        return text if text else "Không nghe được tiếng."
+        return text if text else ""
 
     except Exception as e:
         print(f"    [!] Whisper error: {e}")
-        return "Lỗi trích xuất âm thanh."
+        return ""
     finally:
         if mp3_path and os.path.exists(mp3_path):
             try:

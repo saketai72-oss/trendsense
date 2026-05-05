@@ -10,7 +10,8 @@
       "Bash(.venv\\scripts\\python.exe *)",
       "Bash(venv\\scripts\\python.exe *)",
       "Bash(venv\\scripts\\pip.exe *)",
-      "Bash(npx *)"
+      "Bash(npx *)",
+      "Bash(git commit *)"
     ]
   },
   "$version": 3
