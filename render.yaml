@@ -63,6 +63,30 @@ services:
       - key: FRONTEND_URL
         sync: false
 
+      ## Backend URL (for OAuth redirect defaults)
+      - key: BACKEND_URL
+        sync: false
+
+      ## Authentication (JWT)
+      - key: JWT_SECRET_KEY
+        sync: false
+
+      ## OAuth: Google
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+
+      ## OAuth: GitHub
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_REDIRECT_URI
+        sync: false
+
       ## Scraper Proxy List (JSON array string)
       - key: PROXY_LIST
         sync: false
