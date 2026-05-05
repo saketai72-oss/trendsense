@@ -9,7 +9,7 @@
 import { NextResponse } from "next/server";
 
 // Routes yêu cầu đăng nhập
-const PROTECTED_PATHS = ["/analyze", "/dashboard", "/video"];
+const PROTECTED_PATHS = ["/analyze", "/dashboard", "/video", "/history"];
 
 // Routes công khai (không cần auth)
 const PUBLIC_PATHS = ["/", "/login", "/register", "/auth/callback"];

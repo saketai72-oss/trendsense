@@ -159,6 +159,14 @@ export async function getMyVideos(page = 1, perPage = 20) {
   return fetcher(`/my-videos?page=${page}&per_page=${perPage}`);
 }
 
+export async function getMyVideoDetail(videoId) {
+  return fetcher(`/my-videos/${videoId}`);
+}
+
+export async function deleteMyVideo(videoId) {
+  return fetcher(`/my-videos/${videoId}`, { method: "DELETE" });
+}
+
 // Auth API functions
 export async function authLogin(email, password) {
   return fetcher("/auth/login", {

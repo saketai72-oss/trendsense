@@ -6,7 +6,7 @@ import requests
 from google import genai
 from google.genai import types
 from core.config import service_settings as settings
-from core.db.models import update_ai_results, insert_video_metadata
+from core.db.models import update_ai_results, update_upload_analysis, insert_video_metadata
 from services.tiktok_scraper.video_downloader import download_video
 from services.ai_engine.math_utils import calculate_metrics
 
@@ -186,21 +186,35 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
         )
 
         # BƯỚC 7: Cập nhật DB
-        final_data = {
-            "video_description": result.get("summary", ""),
-            "category": matched,
-            "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
-            "positive_score": result.get("positive_score", 50.0),
-            "top_keywords": ", ".join(result.get("keywords", [])[:5]),
-            "audio_transcript": result.get("audio_transcript", ""),
-            "views_per_hour": vph,
-            "engagement_rate": er,
-            "viral_velocity": velocity,
-            "ai_status": "completed",
-        }
-
-        update_ai_results(video_id, final_data)
-        logger.info(f"✅ Hoàn thành luồng Gemini cho video {video_id}")
+        # Upload videos (video_id starts with "upload_") → video_analyses table
+        # Scraped videos → videos table
+        if video_id.startswith("upload_"):
+            upload_data = {
+                "video_description": result.get("summary", ""),
+                "category": [matched] if isinstance(matched, str) else matched,
+                "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
+                "positive_score": result.get("positive_score", 50.0),
+                "top_keywords": ", ".join(result.get("keywords", [])[:5]),
+                "audio_transcript": result.get("audio_transcript", ""),
+                "ai_status": "completed",
+            }
+            update_upload_analysis(video_id, upload_data)
+            logger.info(f"✅ Hoàn thành Gemini → video_analyses cho upload {video_id}")
+        else:
+            final_data = {
+                "video_description": result.get("summary", ""),
+                "category": matched,
+                "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
+                "positive_score": result.get("positive_score", 50.0),
+                "top_keywords": ", ".join(result.get("keywords", [])[:5]),
+                "audio_transcript": result.get("audio_transcript", ""),
+                "views_per_hour": vph,
+                "engagement_rate": er,
+                "viral_velocity": velocity,
+                "ai_status": "completed",
+            }
+            update_ai_results(video_id, final_data)
+            logger.info(f"✅ Hoàn thành Gemini → videos cho scraped {video_id}")
 
         # Sinh embedding cho semantic search (Ollama local, bỏ qua nếu offline)
         try:
@@ -242,11 +256,20 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
 
 
 def _fallback_error_db(video_id, reason="Lỗi xử lý"):
-    update_ai_results(video_id, {
-        "video_description": reason,
-        "category": "Lỗi",
-        "video_sentiment": "🟡 TRUNG LẬP",
-        "positive_score": 50.0,
-        "ai_status": "error"
-    })
+    if video_id.startswith("upload_"):
+        update_upload_analysis(video_id, {
+            "video_description": reason,
+            "category": ["Lỗi"],
+            "video_sentiment": "🟡 TRUNG LẬP",
+            "positive_score": 50.0,
+            "ai_status": "error",
+        })
+    else:
+        update_ai_results(video_id, {
+            "video_description": reason,
+            "category": "Lỗi",
+            "video_sentiment": "🟡 TRUNG LẬP",
+            "positive_score": 50.0,
+            "ai_status": "error",
+        })
 

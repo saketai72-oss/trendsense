@@ -1029,7 +1029,7 @@ TRẢ VỀ ĐÚNG JSON:
 # ============================================================
 
 def _update_supabase_upload(video_id, results):
-    """Ghi kết quả Trend Alignment Score vào bảng videos trên Supabase."""
+    """Ghi kết quả Trend Alignment Score vào bảng video_analyses (KHÔNG phải videos)."""
     import psycopg2
     import json
 
@@ -1037,24 +1037,36 @@ def _update_supabase_upload(video_id, results):
     conn = psycopg2.connect(db_url)
     try:
         with conn.cursor() as cur:
+            # Ghi toàn bộ kết quả phân tích vào video_analyses
             cur.execute(
                 """
-                UPDATE videos SET
-                    category = %s,
-                    video_description = %s,
-                    top_keywords = %s,
-                    video_sentiment = %s,
-                    positive_score = %s,
-                    video_duration = %s,
-                    video_orientation = %s,
-                    scene_cut_count = %s,
-                    trend_alignment_score = %s,
-                    trend_insights = %s,
-                    audio_transcript = %s,
-                    ai_status = %s
-                WHERE video_id = %s
+                INSERT INTO video_analyses (
+                    video_id, user_id, category, video_description, top_keywords,
+                    video_sentiment, positive_score, video_duration, video_orientation,
+                    scene_cut_count, trend_alignment_score, trend_insights,
+                    audio_transcript, ai_status
+                ) VALUES (
+                    %s,
+                    (SELECT user_id FROM videos WHERE video_id = %s),
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (video_id) DO UPDATE SET
+                    category = EXCLUDED.category,
+                    video_description = EXCLUDED.video_description,
+                    top_keywords = EXCLUDED.top_keywords,
+                    video_sentiment = EXCLUDED.video_sentiment,
+                    positive_score = EXCLUDED.positive_score,
+                    video_duration = EXCLUDED.video_duration,
+                    video_orientation = EXCLUDED.video_orientation,
+                    scene_cut_count = EXCLUDED.scene_cut_count,
+                    trend_alignment_score = EXCLUDED.trend_alignment_score,
+                    trend_insights = EXCLUDED.trend_insights,
+                    audio_transcript = EXCLUDED.audio_transcript,
+                    ai_status = EXCLUDED.ai_status,
+                    updated_at = NOW()
                 """,
                 (
+                    video_id, video_id,
                     [results.get("category")] if results.get("category") not in ["🌍 Khác", "Lỗi"] else [],
                     results.get("video_description", ""),
                     results.get("top_keywords", ""),
@@ -1067,13 +1079,17 @@ def _update_supabase_upload(video_id, results):
                     json.dumps(results.get("trend_insights", {}), ensure_ascii=False) if results.get("trend_insights") else None,
                     results.get("audio_transcript", ""),
                     results.get("ai_status", "completed"),
-                    video_id,
                 ),
             )
+            # Chỉ cập nhật ai_status trên videos để Supabase Realtime bắn event
+            cur.execute(
+                "UPDATE videos SET ai_status = %s WHERE video_id = %s",
+                (results.get("ai_status", "completed"), video_id),
+            )
         conn.commit()
-        print(f"    [✓] Đã cập nhật Supabase (upload): {video_id}")
+        print(f"    [✓] Đã cập nhật video_analyses (upload): {video_id}")
     except Exception as e:
-        print(f"    [!] Supabase upload error: {e}")
+        print(f"    [!] video_analyses upload error: {e}")
         conn.rollback()
     finally:
         conn.close()

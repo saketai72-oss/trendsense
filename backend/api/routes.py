@@ -26,6 +26,7 @@ from core.db.models import (
     get_sentiment_stats, get_top_keywords,
     get_timeline_data, insert_user_video,
     get_video_analysis, get_user_videos,
+    delete_user_video,
 )
 from core.config.backend_settings import STANDARD_CATEGORIES
 from backend.auth.dependencies import get_current_user, get_optional_user
@@ -373,17 +374,99 @@ def my_videos(
     per_page: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    """Get paginated list of videos uploaded by the authenticated user."""
+    """Get paginated list of videos uploaded by the authenticated user with full analysis."""
     user_id = str(user["id"])
     rows, total = get_user_videos(user_id, page=page, per_page=per_page)
     import math as _math
+
+    videos = []
+    for r in rows:
+        v = _serialize(r)
+
+        # Parse trend_insights từ JSON string nếu cần
+        ti = v.get("trend_insights")
+        if isinstance(ti, str):
+            try:
+                import json as _json
+                v["trend_insights"] = _json.loads(ti)
+            except (ValueError, TypeError):
+                v["trend_insights"] = None
+
+        # Tạo signed video URL từ storage path
+        link = v.get("link", "")
+        if isinstance(link, str) and link.startswith("supabase://"):
+            storage_path = link.replace("supabase://", "")
+            try:
+                from backend.api.storage_service import create_download_url
+                v["video_url"] = create_download_url(storage_path, expires_in=3600)
+            except Exception:
+                v["video_url"] = None
+        else:
+            v["video_url"] = None
+
+        videos.append(v)
+
     return {
-        "videos": [_serialize(r) for r in rows],
+        "videos": videos,
         "total": total,
         "page": page,
         "per_page": per_page,
         "total_pages": _math.ceil(total / per_page) if per_page > 0 else 0,
     }
+
+
+# ─────────────────────────────────────────────────────
+# GET /api/my-videos/{video_id} — Full detail for one analysis
+# ─────────────────────────────────────────────────────
+@router.get("/my-videos/{video_id}")
+def my_video_detail(video_id: str, user: dict = Depends(get_current_user)):
+    """Get full analysis detail for a single video owned by the user."""
+    user_id = str(user["id"])
+    video = get_video_by_id(video_id)
+    if not video or str(video.get("user_id")) != user_id:
+        raise HTTPException(status_code=404, detail="Video không tồn tại")
+
+    v = _serialize(video)
+
+    analysis = get_video_analysis(video_id)
+    if analysis:
+        a = _serialize(analysis)
+        a.pop("video_id", None)
+        v.update(a)
+
+    ti = v.get("trend_insights")
+    if isinstance(ti, str):
+        try:
+            import json as _json
+            v["trend_insights"] = _json.loads(ti)
+        except (ValueError, TypeError):
+            v["trend_insights"] = None
+
+    link = v.get("link", "")
+    if isinstance(link, str) and link.startswith("supabase://"):
+        storage_path = link.replace("supabase://", "")
+        try:
+            from backend.api.storage_service import create_download_url
+            v["video_url"] = create_download_url(storage_path, expires_in=3600)
+        except Exception:
+            v["video_url"] = None
+    else:
+        v["video_url"] = None
+
+    return v
+
+
+# ─────────────────────────────────────────────────────
+# DELETE /api/my-videos/{video_id} — Delete user's analysis
+# ─────────────────────────────────────────────────────
+@router.delete("/my-videos/{video_id}")
+def my_video_delete(video_id: str, user: dict = Depends(get_current_user)):
+    """Delete a video and its analysis. Only the owner can delete."""
+    user_id = str(user["id"])
+    deleted = delete_user_video(video_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Video không tồn tại hoặc không thuộc về bạn")
+    return {"message": "Đã xóa thành công", "video_id": video_id}
 
 
 # ─────────────────────────────────────────────────────

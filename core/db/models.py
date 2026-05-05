@@ -975,7 +975,7 @@ def get_video_analysis(video_id: str):
 
 
 def get_user_videos(user_id: str, page: int = 1, per_page: int = 20):
-    """Get paginated list of videos uploaded by a user with their analysis results."""
+    """Get paginated list of videos uploaded by a user with full analysis results."""
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -983,7 +983,9 @@ def get_user_videos(user_id: str, page: int = 1, per_page: int = 20):
             cur.execute("""
                 SELECT v.video_id, v.link, v.caption, v.scrape_date, v.ai_status,
                        va.trend_alignment_score, va.video_sentiment, va.category,
-                       va.video_description, va.positive_score
+                       va.video_description, va.positive_score, va.created_at as analyzed_at,
+                       va.video_duration, va.video_orientation, va.scene_cut_count,
+                       va.trend_insights, va.audio_transcript, va.top_keywords
                 FROM videos v
                 LEFT JOIN video_analyses va ON v.video_id = va.video_id
                 WHERE v.user_id = %s
@@ -999,5 +1001,27 @@ def get_user_videos(user_id: str, page: int = 1, per_page: int = 20):
             total = cur.fetchone()["total"]
 
             return [dict(r) for r in rows], total
+    finally:
+        conn.close()
+
+
+def delete_user_video(video_id: str, user_id: str) -> bool:
+    """Delete a video and its analysis. Only deletes if the video belongs to the user."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM video_analyses WHERE video_id = %s AND user_id = %s",
+                (video_id, user_id)
+            )
+            cur.execute(
+                "DELETE FROM videos WHERE video_id = %s AND user_id = %s",
+                (video_id, user_id)
+            )
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception:
+        conn.rollback()
+        return False
     finally:
         conn.close()

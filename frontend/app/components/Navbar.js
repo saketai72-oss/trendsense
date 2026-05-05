@@ -57,6 +57,7 @@ export default function Navbar() {
               { href: "/", label: "Trang Chủ" },
               { href: "/dashboard", label: "Dashboard" },
               { href: "/analyze", label: "Phân Tích Video" },
+              ...(isAuthenticated ? [{ href: "/history", label: "Lịch Sử" }] : []),
             ].map((item) => (
               <Link key={item.href} href={item.href}
                 className="px-4 py-2.5 rounded-lg text-sm font-semibold no-underline transition-all duration-200"
@@ -114,6 +115,13 @@ export default function Navbar() {
                       <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>{user?.email}</p>
                     </div>
                     <div className="py-1">
+                      <Link href="/history" onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 text-sm no-underline transition-colors"
+                        style={{ color: "var(--text-secondary)" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}>
+                        📋 Lịch sử phân tích
+                      </Link>
                       <Link href="/analyze" onClick={() => setMenuOpen(false)}
                         className="flex items-center gap-3 px-4 py-2.5 text-sm no-underline transition-colors"
                         style={{ color: "var(--text-secondary)" }}
@@ -173,6 +181,7 @@ export default function Navbar() {
                 { href: "/", label: "Trang Chủ" },
                 { href: "/dashboard", label: "Dashboard" },
                 { href: "/analyze", label: "Phân Tích Video" },
+                ...(isAuthenticated ? [{ href: "/history", label: "Lịch Sử" }] : []),
               ].map((item) => (
                 <Link key={item.href} href={item.href}
                   className="px-4 py-3 rounded-lg text-sm font-semibold no-underline transition-all"
