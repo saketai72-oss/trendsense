@@ -205,7 +205,7 @@ class AnalyzeRequest(BaseModel):
 from backend.api.rate_limiter import limiter
 
 @router.post("/analyze")
-@limiter.limit("5/hour")
+@limiter.limit("20/hour")
 def analyze_video(request: Request, body: AnalyzeRequest, user: dict = Depends(get_current_user)):
     """
     Nhận video_id + storage_path sau khi frontend đã upload thẳng lên Supabase.
