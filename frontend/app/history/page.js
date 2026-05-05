@@ -65,7 +65,7 @@ function AnalysisCard({ v, onDelete }) {
   const status = STATUS_MAP[v.ai_status] || STATUS_MAP.pending;
   const ti = v.trend_insights;
   const breakdown = ti?.breakdown || {};
-  const scorePct = v.trend_alignment_score != null ? Math.round(v.trend_alignment_score * 100) : null;
+  const scorePct = v.trend_alignment_score != null ? Math.round(v.trend_alignment_score) : null;
 
   const handleDelete = async (e) => {
     e.stopPropagation();
@@ -121,7 +121,7 @@ function AnalysisCard({ v, onDelete }) {
         <div className="flex items-center gap-3 shrink-0">
           {scorePct != null && (
             <div className="text-center">
-              <ScoreCircle value={v.trend_alignment_score} />
+              <ScoreCircle value={v.trend_alignment_score / 100} />
               <span className="text-[9px] block mt-0.5" style={{ color: "var(--text-muted)" }}>Trend</span>
             </div>
           )}
