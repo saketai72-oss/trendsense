@@ -19,3 +19,4 @@ openai           # OpenAI-compatible client (dùng cho OpenRouter)
 PyJWT>=2.8.0
 passlib[bcrypt]>=1.7.4
 bcrypt>=4.0.0
+email-validator>=2.0.0    # Pydantic EmailStr cần package này
