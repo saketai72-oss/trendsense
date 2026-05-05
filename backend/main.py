@@ -24,9 +24,16 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from backend.api.routes import router
+from backend.auth.routes import router as auth_router
 from core.config.backend_settings import FRONTEND_URL, REDIS_URL
 
 from backend.api.rate_limiter import limiter
+from backend.middleware import (
+    RequestIDMiddleware,
+    RequestLoggingMiddleware,
+    SecurityHeadersMiddleware,
+    register_error_handlers,
+)
 
 logger = logging.getLogger("trendsense.main")
 
@@ -86,14 +93,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Gắn limiter vào app state để routes có thể dùng
-app.state.limiter = limiter
-
-# Middleware: xử lý RateLimitExceeded → 429 JSON
+# ── Exception Handlers ─────────────────────────────────────────────────────────
+register_error_handlers(app)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── Rate Limiter ──────────────────────────────────────────────────────────────
+app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
-# CORS — cho phép Frontend React kết nối
+# ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -105,10 +113,17 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
+
+# ── Custom Middleware (outermost → innermost) ─────────────────────────────────
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestIDMiddleware)
 
 # Mount API routes
 app.include_router(router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 
 @app.get("/")

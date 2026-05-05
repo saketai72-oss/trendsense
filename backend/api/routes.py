@@ -8,8 +8,13 @@ Changes v3.0:
 - POST /api/analyze-gemini: dùng RQ enqueue thay BackgroundTasks
 - Rate limiting: 5 req/giờ cho /analyze, 60 req/phút cho /analyze-gemini
 - Groq → OpenRouter + Groq fallback (llm_client)
+
+Changes v3.1:
+- Auth: upload-url + analyze endpoints require JWT authentication
+- user_id linked to uploaded videos
+- video_analyses table for upload-specific data
 """
-from fastapi import APIRouter, Query, HTTPException, Request
+from fastapi import APIRouter, Query, HTTPException, Request, Depends
 from pydantic import BaseModel
 from typing import Optional
 import math
@@ -20,8 +25,10 @@ from core.db.models import (
     get_dashboard_stats, get_category_stats,
     get_sentiment_stats, get_top_keywords,
     get_timeline_data, insert_user_video,
+    get_video_analysis, get_user_videos,
 )
 from core.config.backend_settings import STANDARD_CATEGORIES
+from backend.auth.dependencies import get_current_user, get_optional_user
 
 router = APIRouter()
 
@@ -151,16 +158,18 @@ class UploadUrlRequest(BaseModel):
 
 
 @router.post("/upload-url")
-def get_upload_url(body: UploadUrlRequest):
+def get_upload_url(body: UploadUrlRequest, user: dict = Depends(get_current_user)):
     """
     Frontend gọi endpoint này trước khi upload.
     Trả về presigned PUT URL và video_id.
     Frontend sau đó PUT file thẳng lên Supabase, rồi gọi POST /api/analyze.
+    Yêu cầu xác thực — video sẽ được liên kết với tài khoản người dùng.
     """
     import uuid
     from backend.api.storage_service import create_upload_url
 
     video_id = f"upload_{uuid.uuid4().hex[:16]}"
+    user_id = str(user["id"])
 
     try:
         upload_url, storage_path = create_upload_url(video_id, body.filename)
@@ -169,9 +178,9 @@ def get_upload_url(body: UploadUrlRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi tạo upload URL: {str(e)[:100]}")
 
-    # Pre-insert vào DB để frontend có thể poll ngay
+    # Pre-insert vào DB với user_id để frontend có thể poll ngay
     try:
-        insert_user_video(video_id, f"supabase://{storage_path}")
+        insert_user_video(video_id, f"supabase://{storage_path}", user_id=user_id)
     except Exception:
         pass
 
@@ -196,10 +205,11 @@ from backend.api.rate_limiter import limiter
 
 @router.post("/analyze")
 @limiter.limit("5/hour")
-def analyze_video(request: Request, body: AnalyzeRequest):
+def analyze_video(request: Request, body: AnalyzeRequest, user: dict = Depends(get_current_user)):
     """
     Nhận video_id + storage_path sau khi frontend đã upload thẳng lên Supabase.
     FastAPI tạo signed download URL và gửi tới Modal để xử lý.
+    Yêu cầu xác thực — chỉ chủ video mới có thể kích hoạt phân tích.
     """
 
     from core.config.backend_settings import MODAL_WEBHOOK_URL
@@ -315,9 +325,18 @@ def check_analysis(video_id: str):
 
     result = _serialize(video)
     status = result.get("ai_status", "pending")
-    is_done = status == "completed"
     is_upload = video_id.startswith("upload_")
     analysis_type = "content_based" if is_upload else "engagement_based"
+
+    # For upload videos, merge data from video_analyses table
+    if is_upload:
+        analysis = get_video_analysis(video_id)
+        if analysis:
+            analysis = _serialize(analysis)
+            result.update(analysis)
+            status = analysis.get("ai_status", status)
+
+    is_done = status in ("completed", "error")
 
     trend_insights = None
     if result.get("trend_insights"):
@@ -342,6 +361,28 @@ def check_analysis(video_id: str):
         "analysis_type": analysis_type,
         "trend_insights": trend_insights,
         "recommendations": recommendations,
+    }
+
+
+# ─────────────────────────────────────────────────────
+# GET /api/my-videos — User's uploaded videos (requires auth)
+# ─────────────────────────────────────────────────────
+@router.get("/my-videos")
+def my_videos(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    user: dict = Depends(get_current_user),
+):
+    """Get paginated list of videos uploaded by the authenticated user."""
+    user_id = str(user["id"])
+    rows, total = get_user_videos(user_id, page=page, per_page=per_page)
+    import math as _math
+    return {
+        "videos": [_serialize(r) for r in rows],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": _math.ceil(total / per_page) if per_page > 0 else 0,
     }
 
 
