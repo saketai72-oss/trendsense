@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(set *)",
+      "Bash(psql *)",
+      "Bash(python *)",
+      "Bash(git *)",
+      "Bash(type *)",
+      "Bash(dir *)"
+    ]
+  },
+  "$version": 3
+}

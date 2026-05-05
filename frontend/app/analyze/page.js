@@ -1,9 +1,11 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import { analyzeVideo, checkAnalysis, getUploadUrl } from "../lib/api";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../lib/AuthContext";
 
 const STEPS = [
   { key: "user_pending", icon: "📋", label: "Đã tiếp nhận yêu cầu" },
@@ -19,6 +21,8 @@ function getStepIndex(status) {
 }
 
 export default function AnalyzePage() {
+  const router = useRouter();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreview, setVideoPreview] = useState(null);
   const [caption, setCaption] = useState("");
@@ -31,6 +35,33 @@ export default function AnalyzePage() {
   const fileInputRef = useRef(null);
   const channelRef = useRef(null);
   const fallbackRef = useRef(null);
+
+  // Auth guard — redirect to login if not authenticated
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.replace("/login");
+    }
+  }, [authLoading, isAuthenticated, router]);
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <>
+        <Navbar />
+        <main className="pb-10 min-h-screen w-full flex items-center justify-center">
+          <div className="text-center">
+            <svg className="animate-spin w-10 h-10 mx-auto mb-4" viewBox="0 0 24 24" style={{ color: "var(--accent-primary)" }}>
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <p style={{ color: "var(--text-muted)" }}>Đang kiểm tra xác thực...</p>
+          </div>
+        </main>
+      </>
+    );
+  }
+
+  if (!isAuthenticated) return null;
 
   useEffect(() => {
     if (!videoId || result) return;
@@ -97,7 +128,7 @@ export default function AnalyzePage() {
     try {
       // 1. Get Presigned URL from Backend
       const { video_id, upload_url, storage_path } = await getUploadUrl(videoFile.name, videoFile.type);
-      
+
       // 2. Upload directly to Supabase Storage
       const uploadRes = await fetch(upload_url, {
         method: "PUT",

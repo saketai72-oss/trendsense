@@ -1,4 +1,5 @@
 import "./globals.css";
+import Providers from "./lib/Providers";
 
 export const metadata = {
   title: "TrendSense — AI Dự Báo Xu Hướng TikTok",
@@ -18,7 +19,9 @@ export default function RootLayout({ children }) {
           rel="stylesheet"
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
