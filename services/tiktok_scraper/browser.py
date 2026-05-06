@@ -123,12 +123,15 @@ def init_driver(proxy: str | None = None):
                 chrome_path = p
                 break
 
-    # Không truyền version_main — để undetected_chromedriver tự nhận diện
-    # từ Chrome binary thực tế, tránh mismatch giữa detection và binary.
+    # Lấy version_main từ env (CI detect) hoặc để None (local auto-detect)
+    v_main = os.environ.get("CHROME_VERSION_MAIN")
+    v_main = int(v_main) if v_main else None
+
     driver = uc.Chrome(
         options=options,
         browser_executable_path=chrome_path,
         use_subprocess=True,
+        version_main=v_main,
     )
 
     driver.set_page_load_timeout(60)
