@@ -1,5 +1,7 @@
 import undetected_chromedriver as uc
 import os
+import re
+import subprocess
 import json
 import random
 import platform
@@ -82,6 +84,37 @@ def is_blocked(driver) -> bool:
         return False
 
 
+# ── Chrome Version Detection ──────────────────────────────────────
+def get_chrome_version() -> int | None:
+    """Detect installed Chrome major version (Linux & Windows)."""
+    os_name = platform.system()
+    try:
+        if os_name == "Linux":
+            result = subprocess.run(
+                ["google-chrome", "--version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            match = re.search(r"(\d+)\.\d+\.\d+\.\d+", result.stdout)
+            if match:
+                return int(match.group(1))
+
+        elif os_name == "Windows":
+            result = subprocess.run(
+                [
+                    "reg", "query",
+                    r"HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon",
+                    "/v", "version",
+                ],
+                capture_output=True, text=True, timeout=10,
+            )
+            match = re.search(r"version\s+REG_SZ\s+(\d+)\.", result.stdout)
+            if match:
+                return int(match.group(1))
+    except Exception as e:
+        print(f"[!] Lỗi detect Chrome version: {e}")
+    return None
+
+
 # ── Driver Init ───────────────────────────────────────────────────
 def init_driver(proxy: str | None = None):
     """
@@ -124,6 +157,13 @@ def init_driver(proxy: str | None = None):
                 chrome_path = p
                 break
 
+    # Detect Chrome version — bắt buộc cho uc 3.5.5
+    v_main = get_chrome_version()
+    if v_main:
+        print(f"[*] Chrome v{v_main} ({platform.system()})")
+    else:
+        print("[!] Không detect được Chrome version")
+
     # Dùng webdriver-manager để tải đúng ChromeDriver khớp với Chrome đã cài
     driver_path = ChromeDriverManager().install()
 
@@ -132,6 +172,7 @@ def init_driver(proxy: str | None = None):
         browser_executable_path=chrome_path,
         driver_executable_path=driver_path,
         use_subprocess=True,
+        version_main=v_main,
     )
 
     driver.set_page_load_timeout(60)
