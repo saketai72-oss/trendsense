@@ -3,6 +3,7 @@ import os
 import json
 import random
 import platform
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" trên Windows
 if hasattr(uc.Chrome, '__del__'):
@@ -123,15 +124,14 @@ def init_driver(proxy: str | None = None):
                 chrome_path = p
                 break
 
-    # Lấy version_main từ env (CI detect) hoặc để None (local auto-detect)
-    v_main = os.environ.get("CHROME_VERSION_MAIN")
-    v_main = int(v_main) if v_main else None
+    # Dùng webdriver-manager để tải đúng ChromeDriver khớp với Chrome đã cài
+    driver_path = ChromeDriverManager().install()
 
     driver = uc.Chrome(
         options=options,
         browser_executable_path=chrome_path,
+        driver_executable_path=driver_path,
         use_subprocess=True,
-        version_main=v_main,
     )
 
     driver.set_page_load_timeout(60)

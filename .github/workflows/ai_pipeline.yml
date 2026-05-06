@@ -39,9 +39,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
-          # Detect installed Chrome major version → pass to Python so ChromeDriver matches
-          CHROME_VER=$(google-chrome --version | grep -oP '\d+' | head -1)
-          echo "CHROME_VERSION_MAIN=$CHROME_VER" >> $GITHUB_ENV
 
       - name: 🕷️ SCRAPE + TRIGGER — Bot Selenium cào metadata → Gửi sang Modal AI
         env:
