@@ -1,6 +1,5 @@
 import undetected_chromedriver as uc
 import os
-import re
 import json
 import random
 import platform
@@ -82,27 +81,6 @@ def is_blocked(driver) -> bool:
         return False
 
 
-# ── Chrome Version Detection ──────────────────────────────────────
-def get_chrome_version():
-    """Radar thông minh: Tự nhận diện hệ điều hành để dò version Chrome"""
-    os_name = platform.system()
-    try:
-        if os_name == 'Linux':
-            output = os.popen('google-chrome --version').read()
-            match = re.search(r' (\d+)\.', output)
-            if match:
-                return int(match.group(1))
-
-        elif os_name == 'Windows':
-            output = os.popen('reg query "HKEY_CURRENT_USER\\Software\\Google\\Chrome\\BLBeacon" /v version').read()
-            match = re.search(r'version\s+REG_SZ\s+(\d+)\.', output)
-            if match:
-                return int(match.group(1))
-    except Exception as e:
-        print(f"[!] Lỗi radar dò version: {e}")
-    return None
-
-
 # ── Driver Init ───────────────────────────────────────────────────
 def init_driver(proxy: str | None = None):
     """
@@ -133,13 +111,6 @@ def init_driver(proxy: str | None = None):
     else:
         print("[*] Không có proxy — dùng IP thật (có thể bị block trên GitHub Actions).")
 
-    # Tự nhận diện version Chrome
-    v_main = get_chrome_version()
-    if v_main:
-        print(f"[*] Phát hiện Chrome v{v_main} ({platform.system()})")
-    else:
-        print("[!] Không dò được Chrome version, dùng bản mới nhất...")
-
     # Tìm Chrome binary trên Windows
     chrome_path = None
     if platform.system() == 'Windows':
@@ -152,14 +123,15 @@ def init_driver(proxy: str | None = None):
                 chrome_path = p
                 break
 
+    # Không truyền version_main — để undetected_chromedriver tự nhận diện
+    # từ Chrome binary thực tế, tránh mismatch giữa detection và binary.
     driver = uc.Chrome(
         options=options,
         browser_executable_path=chrome_path,
         use_subprocess=True,
-        version_main=v_main,
     )
 
     driver.set_page_load_timeout(60)
     driver.implicitly_wait(10)
 
-    return driver
+    return driver
