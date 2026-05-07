@@ -93,11 +93,19 @@ def main():
         vn_tags = ["xuhuong", "xuhuongtiktok", "giaitri", "vietnam", "tintuc", "haihuoc"]
         target_tag = random.choice(vn_tags)
         url = f"https://www.tiktok.com/tag/{target_tag}"
-        
+
         driver.get(url)
         print(f"👉 Đang tải TikTok hashtag: #{target_tag} (Đảm bảo content Việt)...")
-        time.sleep(5)  # Giảm từ 8s → 5s (headless eager load nhanh hơn)
-        
+        time.sleep(3)
+
+        # Kiểm tra trang có load thành công không
+        page_title = (driver.title or "").lower()
+        if "can't be reached" in page_title or "not available" in page_title:
+            print(f"[!] ❌ Trang không load được. Có thể do proxy lỗi hoặc mạng.")
+            print(f"    Tiêu đề trang: {driver.title}")
+            driver.quit()
+            sys.exit(1)
+
         if is_blocked(driver):
             print(f"[!] Bị block ngay tại trang hashtag. Hãy thử thay proxy khác.")
             driver.quit()

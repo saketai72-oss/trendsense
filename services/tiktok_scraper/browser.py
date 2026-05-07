@@ -5,6 +5,8 @@ import subprocess
 import json
 import random
 import platform
+import socket
+import urllib.parse
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" trên Windows
@@ -40,12 +42,72 @@ def _load_proxy_pool() -> list:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _normalize_proxy(raw: str) -> str | None:
+    """
+    Chuẩn hóa proxy URL cho Chrome --proxy-server.
+    Chrome yêu cầu scheme rõ ràng (http://, https://, socks5://).
+    Nếu proxy chỉ có host:port → thêm http://.
+    Nếu proxy có user:pass@host:port → giữ nguyên (Chrome hỗ trợ inline auth).
+    Trả về None nếu proxy không hợp lệ.
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    # Đã có scheme → dùng nguyên
+    if raw.startswith(("http://", "https://", "socks4://", "socks5://")):
+        return raw
+
+    # Có @ nhưng không có scheme → user:pass@host:port
+    if "@" in raw:
+        return f"http://{raw}"
+
+    # Chỉ có host:port
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}:\d+$", raw):
+        return f"http://{raw}"
+
+    # hostname:port
+    if re.match(r"^[a-zA-Z0-9][\w.-]*:\d+$", raw):
+        return f"http://{raw}"
+
+    print(f"[!] Proxy không hợp lệ: '{raw}'")
+    return None
+
+
+def _test_proxy_connectivity(proxy_url: str, timeout: int = 5) -> bool:
+    """Kiểm tra nhanh xem proxy có thể kết nối TCP không."""
+    try:
+        parsed = urllib.parse.urlparse(proxy_url)
+        host = parsed.hostname
+        port = parsed.port
+        if not host or not port:
+            return False
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.close()
+        return True
+    except (socket.timeout, socket.error, OSError):
+        return False
+
+
 def get_random_proxy() -> str | None:
-    """Chọn ngẫu nhiên 1 proxy từ pool. Trả về None nếu pool rỗng."""
+    """Chọn ngẫu nhiên 1 proxy từ pool, kiểm tra kết nối trước khi trả về."""
     pool = _load_proxy_pool()
     if not pool:
         return None
-    return random.choice(pool)
+
+    # Xáo trộn và thử từng proxy
+    random.shuffle(pool)
+    for raw in pool:
+        proxy = _normalize_proxy(raw)
+        if not proxy:
+            continue
+        if _test_proxy_connectivity(proxy):
+            return proxy
+        else:
+            print(f"[!] Proxy không kết nối được: {raw} — bỏ qua.")
+
+    print("[!] ⚠️ Không có proxy nào khả dụng trong pool!")
+    return None
 
 
 # ── Block Detection ────────────────────────────────────────────────
@@ -140,8 +202,13 @@ def init_driver(proxy: str | None = None):
 
     # Gắn proxy nếu có
     if proxy:
-        options.add_argument(f'--proxy-server={proxy}')
-        print(f"[🔀 PROXY] Đang dùng: {proxy.split('@')[-1] if '@' in proxy else proxy}")
+        normalized = _normalize_proxy(proxy)
+        if normalized:
+            options.add_argument(f'--proxy-server={normalized}')
+            display_proxy = normalized.split('@')[-1] if '@' in normalized else normalized
+            print(f"[🔀 PROXY] Đang dùng: {display_proxy}")
+        else:
+            print(f"[!] Proxy không hợp lệ, chạy không proxy.")
     else:
         print("[*] Không có proxy — dùng IP thật (có thể bị block trên GitHub Actions).")
 

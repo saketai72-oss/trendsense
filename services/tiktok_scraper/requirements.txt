@@ -5,3 +5,5 @@ requests==2.33.0
 python-dotenv==1.2.2
 psycopg2-binary==2.9.11
 langdetect==1.0.9
+TikTokApi>=7.3.0
+playwright>=1.40.0
