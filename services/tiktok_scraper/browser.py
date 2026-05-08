@@ -438,34 +438,14 @@ def init_driver(proxy: str | None = None):
 
     print(f"[*] ChromeDriver: {driver_path}")
 
-    # Pre-patch chromedriver TRƯỚC khi tạo uc.Chrome
-    # để uc.Chrome.__init__ thấy binary đã patched và skip auto()
-    try:
-        patcher = uc.Patcher(executable_path=driver_path)
-        if not patcher.is_binary_patched(driver_path):
-            patcher.executable_path = driver_path
-            patcher.patch_exe()
-            print(f"[*] Đã patch ChromeDriver")
-        else:
-            print(f"[*] ChromeDriver đã được patch sẵn")
-    except Exception as e:
-        print(f"[!] Patch warning: {e}")
-
-    # Monkey-patch: chặn uc.Chrome gọi patcher.auto() lần nữa
-    _orig_auto = uc.Patcher.auto
-    uc.Patcher.auto = lambda self: getattr(self, 'executable_path', None)
-
-    try:
-        driver = uc.Chrome(
-            options=options,
-            browser_executable_path=chrome_path,
-            driver_executable_path=driver_path,
-            use_subprocess=True,
-            version_main=v_main,
-        )
-    finally:
-        # Khôi phục patcher.auto gốc
-        uc.Patcher.auto = _orig_auto
+    # Để uc.Chrome tự xử lý patching — không can thiệp
+    driver = uc.Chrome(
+        options=options,
+        browser_executable_path=chrome_path,
+        driver_executable_path=driver_path,
+        use_subprocess=True,
+        version_main=v_main,
+    )
 
     driver.set_page_load_timeout(60)
     driver.implicitly_wait(10)
