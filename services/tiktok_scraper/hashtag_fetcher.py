@@ -7,8 +7,35 @@ TikTokApi dùng Playwright để tạo browser session hợp lệ với TikTok.
 import os
 import sys
 import asyncio
+import subprocess
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+
+def _ensure_playwright_browsers() -> bool:
+    """Kiểm tra và cài đặt Playwright Chromium nếu chưa có."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            browser.close()
+        return True
+    except Exception:
+        print("  [!] Playwright Chromium chưa cài. Đang cài đặt...")
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                check=True, capture_output=True, timeout=120
+            )
+            subprocess.run(
+                [sys.executable, "-m", "playwright", "install-deps", "chromium"],
+                check=True, capture_output=True, timeout=120
+            )
+            print("  [✓] Đã cài Playwright Chromium.")
+            return True
+        except Exception as install_err:
+            print(f"  [!] Không thể cài Playwright: {install_err}")
+            return False
 
 
 def _extract_ms_token_from_driver(driver) -> str:
@@ -42,6 +69,11 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
         print("  [!] Thiếu ms_token. Đảm bảo browser đã load TikTok hoặc set env var ms_token.")
         return []
 
+    # Kiểm tra Playwright browsers trước khi chạy
+    if not _ensure_playwright_browsers():
+        print("  [!] Playwright browsers không khả dụng. Bỏ qua TikTokApi.")
+        return []
+
     async def _fetch():
         video_urls = []
         try:
@@ -69,7 +101,16 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
                         video_urls.append(url)
 
         except Exception as e:
-            print(f"  [!] TikTokApi error: {type(e).__name__}: {str(e)[:200]}")
+            err_name = type(e).__name__
+            err_msg = str(e)[:300]
+            if "browser" in err_msg.lower() or "executable" in err_msg.lower():
+                print(f"  [!] TikTokApi error: {err_name} — Playwright browser không tìm thấy.")
+                print(f"      Chạy: playwright install chromium && playwright install-deps chromium")
+            elif "ms_token" in err_msg.lower() or "cookie" in err_msg.lower() or "403" in err_msg:
+                print(f"  [!] TikTokApi error: {err_name} — ms_token hết hạn hoặc bị block.")
+                print(f"      Cập nhật ms_token mới từ TikTok (F12 → Application → Cookies).")
+            else:
+                print(f"  [!] TikTokApi error: {err_name}: {err_msg}")
 
         return video_urls
 

@@ -18,6 +18,7 @@ jobs:
       MODAL_WEBHOOK_URL: ${{ secrets.MODAL_WEBHOOK_URL }}
       GEMINI_WEBHOOK_URL: ${{ secrets.GEMINI_WEBHOOK_URL }}
       PROXY_LIST: ${{ secrets.PROXY_LIST }}
+      ms_token: ${{ secrets.MS_TOKEN }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
@@ -40,7 +41,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-      - name: 🕷️ SCRAPE + TRIGGER — Bot Selenium cào metadata → Gửi sang Modal AI
+      - name: 🎭 Cài đặt Playwright browsers (cho TikTokApi)
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: 🕷️ SCRAPE + TRIGGER — Bot cào metadata → Gửi sang Modal AI
         env:
           PYTHONPATH: .
         run: python -m services.tiktok_scraper.scraper_main
