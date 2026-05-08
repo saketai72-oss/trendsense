@@ -1,4 +1,4 @@
-import undetected_chromedriver as uc
+from __future__ import annotations
 import os
 import re
 import subprocess
@@ -10,9 +10,18 @@ import urllib.parse
 import urllib.request
 import zipfile
 import tempfile
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import undetected_chromedriver as uc
+
+try:
+    import undetected_chromedriver as uc
+except ImportError:
+    uc = None  # type: ignore[assignment]
 
 # Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" trên Windows
-if hasattr(uc.Chrome, '__del__'):
+if uc is not None and hasattr(uc.Chrome, '__del__'):
     _original_del = uc.Chrome.__del__
     def _safe_del(self):
         try:
