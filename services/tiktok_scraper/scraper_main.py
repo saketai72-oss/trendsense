@@ -145,16 +145,16 @@ def main():
     is_ci = _check_ci_environment(proxy)
 
     driver = init_driver(proxy=proxy)
-    try:
-        # TĂNG TỶ LỆ VIDEO VIỆT NAM (Tránh lỗi do bắt IP quốc tế)
-        vn_tags = ["xuhuong", "xuhuongtiktok", "giaitri", "vietnam", "tintuc", "haihuoc"]
-        target_tag = random.choice(vn_tags)
-        url = f"https://www.tiktok.com/tag/{target_tag}"
 
-        print(f"👉 Đang tải TikTok hashtag: #{target_tag}...")
-        if not _load_page_with_retry(driver, url):
-            driver.quit()
-            sys.exit(1)
+    # TĂNG TỶ LỆ VIDEO VIỆT NAM (Tránh lỗi do bắt IP quốc tế)
+    vn_tags = ["xuhuong", "xuhuongtiktok", "giaitri", "vietnam", "tintuc", "haihuoc"]
+    target_tag = random.choice(vn_tags)
+    url = f"https://www.tiktok.com/tag/{target_tag}"
+
+    print(f"👉 Đang tải TikTok hashtag: #{target_tag}...")
+    if not _load_page_with_retry(driver, url):
+        driver.quit()
+        sys.exit(1)
 
     # 1. Thu thập POOL link dự phòng (gấp 3x target)
     links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
