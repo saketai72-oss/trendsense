@@ -7,7 +7,6 @@ import random
 import platform
 import socket
 import urllib.parse
-from webdriver_manager.chrome import ChromeDriverManager
 
 # Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" trên Windows
 if hasattr(uc.Chrome, '__del__'):
@@ -231,8 +230,16 @@ def init_driver(proxy: str | None = None):
     else:
         print("[!] Không detect được Chrome version")
 
-    # Dùng webdriver-manager để tải đúng ChromeDriver khớp với Chrome đã cài
-    driver_path = ChromeDriverManager().install()
+    # Nếu detect được version → đảm bảo ChromeDriver khớp bằng cách
+    # dùng uc patcher trực tiếp (tránh mismatch giữa apt Chrome và uc auto-download)
+    if v_main:
+        patcher = uc.Patcher(version_main=v_main)
+        patcher.auto()  # Tự download đúng chromedriver cho version này
+        driver_path = patcher.executable_path
+        print(f"[*] ChromeDriver: {driver_path}")
+    else:
+        # Fallback: để uc tự quyết định
+        driver_path = None
 
     driver = uc.Chrome(
         options=options,
