@@ -386,13 +386,24 @@ def init_driver(proxy: str | None = None):
     if v_main:
         driver_path = _download_matching_chromedriver(v_main)
 
-    # Fallback 1: tìm chromedriver trong PATH
+    # Fallback 1: tìm chromedriver trong PATH → copy về /tmp để uc patch được
     if not driver_path:
         import shutil
         system_cd = shutil.which("chromedriver")
         if system_cd:
-            print(f"[*] Dùng system chromedriver: {system_cd}")
-            driver_path = system_cd
+            tmp_cd = os.path.join(tempfile.gettempdir(), "chromedriver_uc")
+            shutil.copy2(system_cd, tmp_cd)
+            os.chmod(tmp_cd, 0o755)
+            # Patch nếu chưa được patch
+            try:
+                patcher = uc.Patcher(executable_path=tmp_cd)
+                if not patcher.is_binary_patched(tmp_cd):
+                    patcher.executable_path = tmp_cd
+                    patcher.patch_exe()
+            except Exception as e:
+                print(f"[!] Không patch được system chromedriver: {e}")
+            driver_path = tmp_cd
+            print(f"[*] Dùng system chromedriver (copy + patch): {tmp_cd}")
 
     # Fallback 2: dùng uc Patcher (có thể mismatch nhưng tốt hơn nothing)
     if not driver_path:
@@ -403,12 +414,14 @@ def init_driver(proxy: str | None = None):
 
     print(f"[*] ChromeDriver: {driver_path}")
 
+    # version_main=None để uc KHÔNG gọi patcher.auto() lần nữa
+    # (driver_path đã được patch sẵn)
     driver = uc.Chrome(
         options=options,
         browser_executable_path=chrome_path,
         driver_executable_path=driver_path,
         use_subprocess=True,
-        version_main=v_main,
+        version_main=None,
     )
 
     driver.set_page_load_timeout(60)
