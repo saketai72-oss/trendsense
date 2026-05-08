@@ -19,6 +19,7 @@ jobs:
       GEMINI_WEBHOOK_URL: ${{ secrets.GEMINI_WEBHOOK_URL }}
       PROXY_LIST: ${{ secrets.PROXY_LIST }}
       ms_token: ${{ secrets.MS_TOKEN }}
+      CF_WORKER_URL: ${{ secrets.CF_WORKER_URL }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
