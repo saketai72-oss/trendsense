@@ -52,11 +52,14 @@ jobs:
         env:
           PYTHONPATH: .
         run: python -m services.tiktok_scraper.scraper_main
+        continue-on-error: true
 
       - name: 📢 Thông báo
+        if: always()
         run: |
           echo "============================================"
-          echo "[✓] Scraping hoàn tất!"
+          echo "[✓] Pipeline hoàn tất!"
+          echo "    Nếu 0 video → kiểm tra PROXY_LIST secret."
+          echo "    TikTok chặn IP datacenter nếu không có residential proxy."
           echo "[✓] Các video đã được gửi sang Modal GPU để xử lý AI."
-          echo "[✓] Kết quả sẽ tự động cập nhật vào Supabase."
-          echo "============================================"
+          echo "=============================================="

@@ -85,8 +85,65 @@ def _trigger_ai_pipeline(video_id, url, video_data, top_comments):
 
 
 
+def _check_ci_environment(proxy):
+    """Kiểm tra nếu đang chạy trên CI mà không có proxy → cảnh báo sớm."""
+    is_ci = os.environ.get("CI", "").lower() == "true" or os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+    if is_ci and not proxy:
+        print("=" * 60)
+        print("[⚠️] CẢNH BÁO: Đang chạy trên CI (GitHub Actions) mà KHÔNG CÓ PROXY!")
+        print("    TikTok chặn IP datacenter — kết quả sẽ rất kém.")
+        print("    → Thêm residential proxy vào secret PROXY_LIST:")
+        print('      ["http://user:pass@residential-host:port"]')
+        print("    → Dịch vụ khuyên dùng: Webshare.io (free tier), Bright Data, SmartProxy")
+        print("=" * 60)
+    return is_ci
+
+
+def _load_page_with_retry(driver, url, max_retries=3, wait=3):
+    """Tải trang với retry + backoff. Trả về True nếu thành công."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            driver.get(url)
+            time.sleep(wait + random.uniform(0.5, 2.0))  # Jitter để tránh pattern
+
+            page_title = (driver.title or "").lower()
+
+            # Trang không load được
+            if "can't be reached" in page_title or "not available" in page_title:
+                if attempt < max_retries:
+                    print(f"  [⟳] Trang không load (attempt {attempt}/{max_retries}). Thử lại sau {wait * attempt}s...")
+                    time.sleep(wait * attempt)
+                    continue
+                print(f"[!] ❌ Trang không load được sau {max_retries} lần.")
+                print(f"    Tiêu đề: {driver.title}")
+                return False
+
+            # Bị block
+            if is_blocked(driver):
+                if attempt < max_retries:
+                    print(f"  [⟳] Bị block (attempt {attempt}/{max_retries}). Thử lại sau {wait * attempt}s...")
+                    time.sleep(wait * attempt * 2)  # Chờ lâu hơn khi bị block
+                    continue
+                print(f"[!] ❌ Bị block sau {max_retries} lần. Cần thay proxy.")
+                return False
+
+            return True
+
+        except Exception as e:
+            if attempt < max_retries:
+                print(f"  [⟳] Lỗi tải trang (attempt {attempt}/{max_retries}): {str(e)[:100]}")
+                time.sleep(wait * attempt)
+                continue
+            print(f"[!] ❌ Lỗi tải trang sau {max_retries} lần: {e}")
+            return False
+
+    return False
+
+
 def main():
     proxy = get_random_proxy()
+    is_ci = _check_ci_environment(proxy)
+
     driver = init_driver(proxy=proxy)
     try:
         # TĂNG TỶ LỆ VIDEO VIỆT NAM (Tránh lỗi do bắt IP quốc tế)
@@ -94,25 +151,10 @@ def main():
         target_tag = random.choice(vn_tags)
         url = f"https://www.tiktok.com/tag/{target_tag}"
 
-        driver.get(url)
-        print(f"👉 Đang tải TikTok hashtag: #{target_tag} (Đảm bảo content Việt)...")
-        time.sleep(3)
-
-        # Kiểm tra trang có load thành công không
-        page_title = (driver.title or "").lower()
-        if "can't be reached" in page_title or "not available" in page_title:
-            print(f"[!] ❌ Trang không load được. Có thể do proxy lỗi hoặc mạng.")
-            print(f"    Tiêu đề trang: {driver.title}")
+        print(f"👉 Đang tải TikTok hashtag: #{target_tag}...")
+        if not _load_page_with_retry(driver, url):
             driver.quit()
             sys.exit(1)
-
-        if is_blocked(driver):
-            print(f"[!] Bị block ngay tại trang hashtag. Hãy thử thay proxy khác.")
-            driver.quit()
-            sys.exit(1)
-            
-    except Exception as e:
-        print(f"[!] Lỗi khi tải trang hashtag (Timeout?): {e}")
 
     # 1. Thu thập POOL link dự phòng (gấp 3x target)
     links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
@@ -131,17 +173,34 @@ def main():
             break
 
         print(f"\n[{i}/{len(links)}] Đang cào: {link}  (Đã lưu: {saved_count}/{target})")
-        try:
-            driver.get(link)
-            time.sleep(2.5)  # Giảm từ 4s → 2.5s (eager strategy đã tải DOM xong)
-            
+
+        # Tải video page với retry
+        page_loaded = False
+        for attempt in range(1, 4):
+            try:
+                driver.get(link)
+                time.sleep(2.5 + random.uniform(0, 1.5))
+
+                if is_blocked(driver):
+                    if attempt < 3:
+                        print(f"  [⟳] Bị block khi tải video (attempt {attempt}/3). Chờ {5 * attempt}s...")
+                        time.sleep(5 * attempt)
+                        continue
+                    print(f"  [🚫] Bị block! Dừng cào — cần xoay vòng proxy.")
+                    break
+                page_loaded = True
+                break
+            except Exception as e:
+                if attempt < 3:
+                    print(f"  [⟳] Lỗi tải video (attempt {attempt}/3): {str(e)[:80]}")
+                    time.sleep(3 * attempt)
+                    continue
+                print(f"  [!] Bỏ qua video sau 3 lần thử: {str(e)[:80]}")
+
+        if not page_loaded:
             if is_blocked(driver):
-                print(f"  [🚫] Trình duyệt bị block! Proxy hiện tại đã bị phát hiện. Cần xoay vòng proxy.")
-                break # Dừng vòng lặp để lần chạy sau dùng proxy khác
-                
-        except Exception as e:
-            print(f"  [!] Gặp lỗi khi truy cập link (Timeout video này): {e} -> Bỏ qua.")
-            continue
+                break  # Dừng toàn bộ vòng lặp
+            continue  # Bỏ qua video này, thử video tiếp
 
         # Bóc tách các chỉ số cơ bản
         stats = extract_basic_stats(driver.page_source)
