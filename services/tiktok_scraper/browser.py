@@ -394,16 +394,8 @@ def init_driver(proxy: str | None = None):
             tmp_cd = os.path.join(tempfile.gettempdir(), "chromedriver_uc")
             shutil.copy2(system_cd, tmp_cd)
             os.chmod(tmp_cd, 0o755)
-            # Patch nếu chưa được patch
-            try:
-                patcher = uc.Patcher(executable_path=tmp_cd)
-                if not patcher.is_binary_patched(tmp_cd):
-                    patcher.executable_path = tmp_cd
-                    patcher.patch_exe()
-            except Exception as e:
-                print(f"[!] Không patch được system chromedriver: {e}")
             driver_path = tmp_cd
-            print(f"[*] Dùng system chromedriver (copy + patch): {tmp_cd}")
+            print(f"[*] Dùng system chromedriver (copy → {tmp_cd})")
 
     # Fallback 2: dùng uc Patcher (có thể mismatch nhưng tốt hơn nothing)
     if not driver_path:
@@ -414,15 +406,34 @@ def init_driver(proxy: str | None = None):
 
     print(f"[*] ChromeDriver: {driver_path}")
 
-    # version_main=None để uc KHÔNG gọi patcher.auto() lần nữa
-    # (driver_path đã được patch sẵn)
-    driver = uc.Chrome(
-        options=options,
-        browser_executable_path=chrome_path,
-        driver_executable_path=driver_path,
-        use_subprocess=True,
-        version_main=None,
-    )
+    # Pre-patch chromedriver TRƯỚC khi tạo uc.Chrome
+    # để uc.Chrome.__init__ thấy binary đã patched và skip auto()
+    try:
+        patcher = uc.Patcher(executable_path=driver_path)
+        if not patcher.is_binary_patched(driver_path):
+            patcher.executable_path = driver_path
+            patcher.patch_exe()
+            print(f"[*] Đã patch ChromeDriver")
+        else:
+            print(f"[*] ChromeDriver đã được patch sẵn")
+    except Exception as e:
+        print(f"[!] Patch warning: {e}")
+
+    # Monkey-patch: chặn uc.Chrome gọi patcher.auto() lần nữa
+    _orig_auto = uc.Patcher.auto
+    uc.Patcher.auto = lambda self: getattr(self, 'executable_path', None)
+
+    try:
+        driver = uc.Chrome(
+            options=options,
+            browser_executable_path=chrome_path,
+            driver_executable_path=driver_path,
+            use_subprocess=True,
+            version_main=v_main,
+        )
+    finally:
+        # Khôi phục patcher.auto gốc
+        uc.Patcher.auto = _orig_auto
 
     driver.set_page_load_timeout(60)
     driver.implicitly_wait(10)
