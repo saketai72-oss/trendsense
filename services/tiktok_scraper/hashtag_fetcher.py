@@ -19,9 +19,11 @@ def _ensure_playwright_browsers() -> bool:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             browser.close()
+        print("  [✓] Playwright Chromium khả dụng.")
         return True
-    except Exception:
-        print("  [!] Playwright Chromium chưa cài. Đang cài đặt...")
+    except Exception as e:
+        print(f"  [!] Playwright Chromium lỗi: {type(e).__name__}: {str(e)[:200]}")
+        print("  [!] Đang thử cài đặt...")
         try:
             subprocess.run(
                 [sys.executable, "-m", "playwright", "install", "chromium"],
@@ -103,14 +105,17 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
         except Exception as e:
             err_name = type(e).__name__
             err_msg = str(e)[:300]
-            if "browser" in err_msg.lower() or "executable" in err_msg.lower():
-                print(f"  [!] TikTokApi error: {err_name} — Playwright browser không tìm thấy.")
+            if err_name == "EmptyResponseException":
+                print(f"  [!] TikTokApi: {err_name} — TikTok trả về rỗng.")
+                print(f"      Nguyên nhân: IP bị block, ms_token hết hạn, hoặc hashtag không tồn tại.")
+            elif "browser" in err_msg.lower() or "executable" in err_msg.lower():
+                print(f"  [!] TikTokApi: {err_name} — Playwright browser không tìm thấy.")
                 print(f"      Chạy: playwright install chromium && playwright install-deps chromium")
             elif "ms_token" in err_msg.lower() or "cookie" in err_msg.lower() or "403" in err_msg:
-                print(f"  [!] TikTokApi error: {err_name} — ms_token hết hạn hoặc bị block.")
+                print(f"  [!] TikTokApi: {err_name} — ms_token hết hạn hoặc bị block.")
                 print(f"      Cập nhật ms_token mới từ TikTok (F12 → Application → Cookies).")
             else:
-                print(f"  [!] TikTokApi error: {err_name}: {err_msg}")
+                print(f"  [!] TikTokApi: {err_name}: {err_msg}")
 
         return video_urls
 
