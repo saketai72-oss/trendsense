@@ -42,6 +42,21 @@ jobs:
           echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
+          # Cài chromedriver matching version (fallback cho code)
+          CHROME_VER=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+' | head -1)
+          echo "[*] Chrome version: $CHROME_VER"
+          CD_MAJOR=$(echo $CHROME_VER | cut -d. -f1)
+          # Thử download chromedriver matching từ Google API
+          CD_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/linux64/chromedriver-linux64.zip"
+          if wget -q --spider "$CD_URL" 2>/dev/null; then
+            wget -q -O /tmp/chromedriver.zip "$CD_URL"
+            sudo unzip -o /tmp/chromedriver.zip -d /tmp/
+            sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+            sudo chmod +x /usr/local/bin/chromedriver
+            echo "[*] Đã cài chromedriver $CHROME_VER"
+          else
+            echo "[!] Không tìm thấy chromedriver $CHROME_VER, sẽ dùng fallback trong code"
+          fi
 
       - name: 🎭 Cài đặt Playwright browsers (cho TikTokApi)
         run: |

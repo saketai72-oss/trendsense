@@ -227,7 +227,19 @@ def _download_matching_chromedriver(chrome_version: int) -> str | None:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode())
 
-        platform_key = "linux64" if platform.system() == "Linux" else "win64"
+        # Detect platform + architecture đúng cho Chrome for Testing
+        system = platform.system()
+        machine = platform.machine().lower()
+        if system == "Linux":
+            platform_key = "linux-arm64" if machine in ("aarch64", "arm64") else "linux64"
+        elif system == "Windows":
+            platform_key = "win64"
+        elif system == "Darwin":
+            platform_key = "mac-arm64" if machine == "arm64" else "mac-x64"
+        else:
+            platform_key = "linux64"
+        print(f"[*] Platform: {system}/{machine} → {platform_key}")
+
         driver_url = None
 
         # Tìm version khớp chính xác trước
@@ -282,6 +294,23 @@ def _download_matching_chromedriver(chrome_version: int) -> str | None:
 
             os.chmod(dest_path, 0o755)
             os.remove(zip_path)
+
+            # Verify binary hợp lệ (tránh Exec format error)
+            if platform.system() != "Windows":
+                try:
+                    result = subprocess.run(
+                        [dest_path, "--version"], capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode != 0 and "cannot execute" in (result.stderr + result.stdout).lower():
+                        print(f"[!] ChromeDriver binary không chạy được trên kiến trúc này ({machine})")
+                        os.remove(dest_path)
+                        return None
+                except OSError as e:
+                    if "Exec format error" in str(e):
+                        print(f"[!] ChromeDriver sai kiến trúc: {machine}")
+                        os.remove(dest_path)
+                        return None
+
             print(f"[*] Đã download ChromeDriver: {dest_path}")
 
         # Bước 4: Patch để bypass bot detection
@@ -357,8 +386,16 @@ def init_driver(proxy: str | None = None):
     if v_main:
         driver_path = _download_matching_chromedriver(v_main)
 
+    # Fallback 1: tìm chromedriver trong PATH
     if not driver_path:
-        # Fallback: dùng uc Patcher (có thể mismatch nhưng tốt hơn nothing)
+        import shutil
+        system_cd = shutil.which("chromedriver")
+        if system_cd:
+            print(f"[*] Dùng system chromedriver: {system_cd}")
+            driver_path = system_cd
+
+    # Fallback 2: dùng uc Patcher (có thể mismatch nhưng tốt hơn nothing)
+    if not driver_path:
         print("[*] Fallback: dùng uc.Patcher để download ChromeDriver...")
         patcher = uc.Patcher(version_main=v_main)
         patcher.auto()
