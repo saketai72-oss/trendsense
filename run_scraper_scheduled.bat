@@ -9,5 +9,6 @@
 :: 4. Action: Start a program → Browse đến file này
 
 cd /d "%~dp0"
+set PYTHONIOENCODING=utf-8
 call venv\Scripts\activate.bat
 python -m services.tiktok_scraper.scraper_main >> logs\scraper.log 2>&1
