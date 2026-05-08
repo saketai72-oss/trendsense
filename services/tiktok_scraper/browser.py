@@ -428,7 +428,7 @@ def init_driver(proxy: str | None = None):
             driver_path = tmp_cd
             print(f"[*] Dùng system chromedriver (copy → {tmp_cd})")
 
-    # Fallback 2: dùng uc Patcher (có thể mismatch nhưng tốt hơn nothing)
+    # Fallback 3: dùng uc Patcher (có thể mismatch nhưng tốt hơn nothing)
     if not driver_path:
         print("[*] Fallback: dùng uc.Patcher để download ChromeDriver...")
         patcher = uc.Patcher(version_main=v_main)

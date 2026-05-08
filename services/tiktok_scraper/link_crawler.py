@@ -72,18 +72,17 @@ def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
     # === CHIẾN LƯỢC 2: TikTokApi (anti-bot) ===
     if not links:
         raw_urls = fetch_hashtag_videos(tag, max_videos=buffer_target, driver=driver)
+        for url in raw_urls:
+            video_id = extract_video_id(url)
+            if video_id and not is_scraped(video_id):
+                clean_link = url.split('?')[0]
+                if clean_link not in links:
+                    links.append(clean_link)
+                    print(f"  + Chốt video MỚI (TikTokApi): {video_id} ({len(links)}/{buffer_target})")
+            if len(links) >= buffer_target:
+                break
 
-    for url in raw_urls:
-        video_id = extract_video_id(url)
-        if video_id and not is_scraped(video_id):
-            clean_link = url.split('?')[0]
-            if clean_link not in links:
-                links.append(clean_link)
-                print(f"  + Chốt video MỚI: {video_id} ({len(links)}/{buffer_target})")
-        if len(links) >= buffer_target:
-            break
-
-    # === CHIẾN LƯỢC 2: Selenium DOM scraping (fallback cuối) ===
+    # === CHIẾN LƯỢC 3: Selenium DOM scraping (fallback cuối) ===
     if not links:
         print("[*] Fallback: Selenium DOM scraping...")
         from selenium.webdriver.common.by import By
