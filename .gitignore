@@ -37,4 +37,4 @@ frontend/.next/
 .env.local
 .qwen/
 
-scripts
+scripts/
