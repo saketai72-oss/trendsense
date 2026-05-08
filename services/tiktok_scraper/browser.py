@@ -362,24 +362,45 @@ def init_driver(proxy: str | None = None):
     else:
         print("[*] Không có proxy — dùng IP thật (có thể bị block trên GitHub Actions).")
 
-    # Tìm Chrome binary trên Windows
+    # Tìm Chrome binary — explicit path để tránh nhầm lẫn nhiều Chrome installations
+    import shutil as _shutil
     chrome_path = None
     if platform.system() == 'Windows':
-        paths = [
+        for p in [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-        ]
-        for p in paths:
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]:
             if os.path.exists(p):
                 chrome_path = p
                 break
+    elif platform.system() == 'Linux':
+        for binary in ["google-chrome-stable", "google-chrome", "chromium-browser", "chromium"]:
+            path = _shutil.which(binary)
+            if path:
+                chrome_path = path
+                break
 
-    # Detect Chrome version — bắt buộc cho uc 3.5.5
-    v_main = get_chrome_version()
-    if v_main:
-        print(f"[*] Chrome v{v_main} ({platform.system()})")
-    else:
-        print("[!] Không detect được Chrome version")
+    # Detect Chrome version — từ binary THỰC TẾ (không phải package manager)
+    v_main = None
+    if chrome_path:
+        try:
+            result = subprocess.run(
+                [chrome_path, "--version"], capture_output=True, text=True, timeout=10
+            )
+            match = re.search(r"(\d+)\.\d+\.\d+\.\d+", result.stdout)
+            if match:
+                v_main = int(match.group(1))
+                full_match = re.search(r"(\d+\.\d+\.\d+\.\d+)", result.stdout)
+                full_ver = full_match.group(1) if full_match else f"{v_main}"
+                print(f"[*] Chrome binary: {chrome_path}")
+                print(f"[*] Chrome version: {full_ver}")
+        except Exception as e:
+            print(f"[!] Lỗi detect Chrome version: {e}")
+
+    if not v_main:
+        v_main = get_chrome_version()
+        if v_main:
+            print(f"[*] Chrome v{v_main} (fallback detection)")
 
     # Download đúng ChromeDriver khớp Chrome binary — ưu tiên Chrome for Testing API
     driver_path = None
@@ -399,11 +420,10 @@ def init_driver(proxy: str | None = None):
 
     # Fallback 2: tìm chromedriver trong PATH → copy về /tmp để uc patch được
     if not driver_path:
-        import shutil
-        system_cd = shutil.which("chromedriver")
+        system_cd = _shutil.which("chromedriver")
         if system_cd:
             tmp_cd = os.path.join(tempfile.gettempdir(), "chromedriver_uc")
-            shutil.copy2(system_cd, tmp_cd)
+            _shutil.copy2(system_cd, tmp_cd)
             os.chmod(tmp_cd, 0o755)
             driver_path = tmp_cd
             print(f"[*] Dùng system chromedriver (copy → {tmp_cd})")
