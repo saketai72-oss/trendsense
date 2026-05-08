@@ -106,7 +106,7 @@ def _extract_stats_regex_safe(html):
         end = html.find('","createTime"', start)
         if start > 7 and end > start:
             caption = html[start:end]
-    except:
+    except Exception:
         pass
 
     return {
@@ -127,7 +127,7 @@ def extract_top_comments(driver, has_comments_to_load):
         time.sleep(random.uniform(0.8, 2.5)) 
         driver.execute_script("arguments[0].click();", comment_btn)
         time.sleep(random.uniform(2.0, 4.0)) 
-    except: pass
+    except Exception: pass
 
     print("  [*] Đang tải bình luận...")
     comments_loaded = False
@@ -156,7 +156,7 @@ def extract_top_comments(driver, has_comments_to_load):
             try:
                 driver.execute_script("arguments[0].scrollIntoView(true);", current_comments[-1])
                 time.sleep(random.uniform(1.2, 3.1)) 
-            except: break
+            except Exception: break
 
     comments_data = []
     try:
@@ -174,8 +174,8 @@ def extract_top_comments(driver, has_comments_to_load):
                         c_like_num = num
                         break
                 comments_data.append({"text": c_text.replace('\n', ' '), "likes_num": c_like_num})
-            except: pass
-    except: pass
+            except Exception: pass
+    except Exception: pass
         
     comments_data.sort(key=lambda x: x["likes_num"], reverse=True)
     

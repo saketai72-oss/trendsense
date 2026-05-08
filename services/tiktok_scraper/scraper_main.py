@@ -17,7 +17,6 @@ except ImportError:
 
 from core.config import service_settings as settings
 from services.tiktok_scraper.browser import init_driver, get_random_proxy, is_blocked
-from core.db.session import get_connection
 from core.db.models import extract_video_id, mark_as_scraped, insert_video_metadata
 from services.tiktok_scraper.link_crawler import get_trending_links
 from services.tiktok_scraper.content_parser import extract_basic_stats, extract_top_comments

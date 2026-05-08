@@ -36,3 +36,5 @@ frontend/.next/
 .next/
 .env.local
 .qwen/
+
+scripts
