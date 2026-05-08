@@ -36,27 +36,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r services/tiktok_scraper/requirements.txt
 
-      - name: 🌐 Cài đặt Chrome (Google official — luôn latest stable)
+      - name: 🌐 Cài đặt Chrome + ChromeDriver matching
         run: |
+          # Cài Chrome stable
           wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --batch --dearmor | sudo tee /usr/share/keyrings/google-chrome.gpg > /dev/null
           echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
-          # Cài chromedriver matching version (fallback cho code)
-          CHROME_VER=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+' | head -1)
-          echo "[*] Chrome version: $CHROME_VER"
-          CD_MAJOR=$(echo $CHROME_VER | cut -d. -f1)
-          # Thử download chromedriver matching từ Google API
+          
+          # Lấy version THỰC TẾ từ Chrome binary (không phải từ package manager)
+          CHROME_BIN=$(which google-chrome-stable || which google-chrome)
+          CHROME_VER=$($CHROME_BIN --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+          echo "[*] Chrome binary version: $CHROME_VER"
+          
+          # Download chromedriver matching từ Chrome for Testing
           CD_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/linux64/chromedriver-linux64.zip"
+          echo "[*] Trying: $CD_URL"
           if wget -q --spider "$CD_URL" 2>/dev/null; then
             wget -q -O /tmp/chromedriver.zip "$CD_URL"
             sudo unzip -o /tmp/chromedriver.zip -d /tmp/
-            sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+            sudo cp /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
             sudo chmod +x /usr/local/bin/chromedriver
-            echo "[*] Đã cài chromedriver $CHROME_VER"
+            echo "[*] Installed chromedriver $CHROME_VER"
           else
-            echo "[!] Không tìm thấy chromedriver $CHROME_VER, sẽ dùng fallback trong code"
+            # Fallback: dùng chromedriver-autoinstaller trong Python
+            echo "[!] ChromeDriver $CHROME_VER not found on CfT API. Will use Python fallback."
           fi
+          
+          # Verify version match
+          CD_VER=$(/usr/local/bin/chromedriver --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+\.\d+' || echo "none")
+          echo "[*] ChromeDriver version: $CD_VER"
+          echo "[*] Chrome version: $CHROME_VER"
 
       - name: 🎭 Cài đặt Playwright browsers (cho TikTokApi)
         run: |

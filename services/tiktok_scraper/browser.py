@@ -386,7 +386,18 @@ def init_driver(proxy: str | None = None):
     if v_main:
         driver_path = _download_matching_chromedriver(v_main)
 
-    # Fallback 1: tìm chromedriver trong PATH → copy về /tmp để uc patch được
+    # Fallback 1: chromedriver-autoinstaller (tự detect Chrome binary version)
+    if not driver_path:
+        try:
+            import chromedriver_autoinstaller
+            cd_path = chromedriver_autoinstaller.install()
+            if cd_path:
+                driver_path = str(cd_path)
+                print(f"[*] chromedriver-autoinstaller: {driver_path}")
+        except Exception as e:
+            print(f"[!] chromedriver-autoinstaller failed: {e}")
+
+    # Fallback 2: tìm chromedriver trong PATH → copy về /tmp để uc patch được
     if not driver_path:
         import shutil
         system_cd = shutil.which("chromedriver")
