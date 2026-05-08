@@ -402,12 +402,13 @@ def init_driver(proxy: str | None = None):
         if v_main:
             print(f"[*] Chrome v{v_main} (fallback detection)")
 
-    # Download đúng ChromeDriver khớp Chrome binary — ưu tiên Chrome for Testing API
+    # Download đúng ChromeDriver khớp Chrome binary
     driver_path = None
-    if v_main:
+    if v_main and platform.system() != 'Windows':
+        # Chỉ dùng Chrome for Testing API trên Linux (Windows hay bị sai kiến trúc)
         driver_path = _download_matching_chromedriver(v_main)
 
-    # Fallback 1: chromedriver-autoinstaller (tự detect Chrome binary version)
+    # Fallback 1: chromedriver-autoinstaller (tự detect Chrome binary version — hoạt động trên mọi OS)
     if not driver_path:
         try:
             import chromedriver_autoinstaller
