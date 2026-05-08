@@ -7,6 +7,9 @@ import random
 import platform
 import socket
 import urllib.parse
+import urllib.request
+import zipfile
+import tempfile
 
 # Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" trên Windows
 if hasattr(uc.Chrome, '__del__'):
@@ -176,6 +179,125 @@ def get_chrome_version() -> int | None:
     return None
 
 
+# ── ChromeDriver Version Matching ────────────────────────────────
+def _download_matching_chromedriver(chrome_version: int) -> str | None:
+    """
+    Download ChromeDriver khớp chính xác với Chrome version đã cài.
+    Dùng Chrome for Testing JSON API (không phụ thuộc uc.Patcher auto-download).
+
+    Trả về đường dẫn chromedriver đã patch, hoặc None nếu thất bại.
+    """
+    # Bước 1: Lấy version đầy đủ từ Chrome binary
+    full_version = None
+    if platform.system() == "Linux":
+        for binary in ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"]:
+            try:
+                result = subprocess.run(
+                    [binary, "--version"], capture_output=True, text=True, timeout=10
+                )
+                match = re.search(r"(\d+\.\d+\.\d+\.\d+)", result.stdout)
+                if match:
+                    full_version = match.group(1)
+                    break
+            except FileNotFoundError:
+                continue
+    elif platform.system() == "Windows":
+        # Thử registry trước (đáng tin cậy hơn chrome.exe --version trên Windows)
+        try:
+            result = subprocess.run(
+                ["reg", "query", r"HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon", "/v", "version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            match = re.search(r"version\s+REG_SZ\s+(\d+\.\d+\.\d+\.\d+)", result.stdout)
+            if match:
+                full_version = match.group(1)
+        except Exception:
+            pass
+
+    if not full_version:
+        print(f"[!] Không lấy được full version string cho Chrome {chrome_version}")
+        return None
+
+    print(f"[*] Chrome full version: {full_version}")
+
+    # Bước 2: Query Chrome for Testing API để tìm ChromeDriver matching
+    try:
+        api_url = "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json"
+        req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+
+        platform_key = "linux64" if platform.system() == "Linux" else "win64"
+        driver_url = None
+
+        # Tìm version khớp chính xác trước
+        for v in data.get("versions", []):
+            if v.get("version") == full_version:
+                downloads = v.get("downloads", {}).get("chromedriver", [])
+                for dl in downloads:
+                    if dl.get("platform") == platform_key:
+                        driver_url = dl["url"]
+                        break
+                break
+
+        # Nếu không tìm thấy exact match, tìm version gần nhất cùng major
+        if not driver_url:
+            for v in reversed(data.get("versions", [])):
+                if v.get("version", "").startswith(f"{chrome_version}."):
+                    downloads = v.get("downloads", {}).get("chromedriver", [])
+                    for dl in downloads:
+                        if dl.get("platform") == platform_key:
+                            driver_url = dl["url"]
+                            print(f"[*] Không có ChromeDriver {full_version}, dùng {v['version']} thay thế")
+                            break
+                    if driver_url:
+                        break
+
+        if not driver_url:
+            print(f"[!] Không tìm thấy ChromeDriver cho Chrome {chrome_version} trên API")
+            return None
+
+        # Bước 3: Download và extract
+        dest_dir = os.path.join(tempfile.gettempdir(), f"chromedriver_{chrome_version}")
+        dest_path = os.path.join(
+            dest_dir,
+            "chromedriver.exe" if platform.system() == "Windows" else "chromedriver",
+        )
+
+        if os.path.exists(dest_path):
+            print(f"[*] ChromeDriver đã có sẵn: {dest_path}")
+        else:
+            os.makedirs(dest_dir, exist_ok=True)
+            zip_path = os.path.join(dest_dir, "chromedriver.zip")
+            print(f"[*] Đang download ChromeDriver từ: {driver_url}")
+            urllib.request.urlretrieve(driver_url, zip_path)
+
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for name in zf.namelist():
+                    if name.endswith("chromedriver") or name.endswith("chromedriver.exe"):
+                        # Extract vào dest_dir
+                        with zf.open(name) as src, open(dest_path, "wb") as dst:
+                            dst.write(src.read())
+                        break
+
+            os.chmod(dest_path, 0o755)
+            os.remove(zip_path)
+            print(f"[*] Đã download ChromeDriver: {dest_path}")
+
+        # Bước 4: Patch để bypass bot detection
+        patcher = uc.Patcher(executable_path=dest_path)
+        if not patcher.is_binary_patched(dest_path):
+            patcher.executable_path = dest_path
+            patcher.patch_exe()
+            print(f"[*] Đã patch ChromeDriver (bypass detection)")
+
+        return dest_path
+
+    except Exception as e:
+        print(f"[!] Lỗi download ChromeDriver: {type(e).__name__}: {str(e)[:200]}")
+        return None
+
+
 # ── Driver Init ───────────────────────────────────────────────────
 def init_driver(proxy: str | None = None):
     """
@@ -230,16 +352,19 @@ def init_driver(proxy: str | None = None):
     else:
         print("[!] Không detect được Chrome version")
 
-    # Nếu detect được version → đảm bảo ChromeDriver khớp bằng cách
-    # dùng uc patcher trực tiếp (tránh mismatch giữa apt Chrome và uc auto-download)
+    # Download đúng ChromeDriver khớp Chrome binary — ưu tiên Chrome for Testing API
+    driver_path = None
     if v_main:
+        driver_path = _download_matching_chromedriver(v_main)
+
+    if not driver_path:
+        # Fallback: dùng uc Patcher (có thể mismatch nhưng tốt hơn nothing)
+        print("[*] Fallback: dùng uc.Patcher để download ChromeDriver...")
         patcher = uc.Patcher(version_main=v_main)
-        patcher.auto()  # Tự download đúng chromedriver cho version này
+        patcher.auto()
         driver_path = patcher.executable_path
-        print(f"[*] ChromeDriver: {driver_path}")
-    else:
-        # Fallback: để uc tự quyết định
-        driver_path = None
+
+    print(f"[*] ChromeDriver: {driver_path}")
 
     driver = uc.Chrome(
         options=options,
