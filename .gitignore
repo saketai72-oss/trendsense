@@ -4,6 +4,7 @@
 /data/videos/*
 !/data/videos/.gitkeep
 /data/edge_profile/
+logs/
 
 # Model AI - CÓ push lên GitHub
 !/data/models/rf_model.joblib
