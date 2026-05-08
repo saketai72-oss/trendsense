@@ -1,7 +1,7 @@
 """
 Hashtag Fetcher — Thu thập video URLs từ TikTok hashtag bằng TikTokApi.
 
-Tự động lấy ms_token từ Selenium browser cookies → truyền cho TikTokApi.
+Tự động lấy ms_token từ Selenium cookies → HTTP auto-fetch → Env var.
 TikTokApi dùng Playwright để tạo browser session hợp lệ với TikTok.
 """
 import os
@@ -10,6 +10,7 @@ import asyncio
 import subprocess
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from services.tiktok_scraper.token_fetcher import get_ms_token
 
 
 def _ensure_playwright_browsers() -> bool:
@@ -40,21 +41,10 @@ def _ensure_playwright_browsers() -> bool:
             return False
 
 
-def _extract_ms_token_from_driver(driver) -> str:
-    """Trích xuất ms_token từ Selenium browser cookies."""
-    try:
-        for c in driver.get_cookies():
-            if c.get("name") == "msToken":
-                return c["value"]
-    except Exception:
-        pass
-    return os.environ.get("ms_token", "")
-
-
 def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str = None) -> list[str]:
     """
     Dùng TikTokApi để lấy video từ hashtag.
-    Cần ms_token (tự động lấy từ Selenium browser cookies hoặc env var).
+    Cần ms_token (tự động lấy từ Selenium → HTTP fetch → env var).
     """
     try:
         from TikTokApi import TikTokApi
@@ -62,13 +52,9 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
         print("  [!] TikTokApi chưa cài. Chạy: pip install TikTokApi")
         return []
 
-    ms_token = ""
-    if driver:
-        ms_token = _extract_ms_token_from_driver(driver)
+    # Lấy ms_token tự động (Selenium → HTTP → env)
+    ms_token = get_ms_token(driver=driver, proxy=proxy)
     if not ms_token:
-        ms_token = os.environ.get("ms_token", "")
-    if not ms_token:
-        print("  [!] Thiếu ms_token. Đảm bảo browser đã load TikTok hoặc set env var ms_token.")
         return []
 
     # Kiểm tra Playwright browsers trước khi chạy
