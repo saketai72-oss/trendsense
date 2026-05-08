@@ -157,7 +157,9 @@ def main():
         sys.exit(1)
 
     # 1. Thu thập POOL link dự phòng (gấp 3x target)
-    links = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
+    links, api_stats = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
+    if api_stats:
+        print(f"  [📊] TikTokApi cung cấp stats cho {len(api_stats)} video (bỏ qua Selenium scrape)")
 
     print("\n===== BẮT ĐẦU THU THẬP DỮ LIỆU =====\n")
     today = datetime.now().date().isoformat()
@@ -174,38 +176,53 @@ def main():
 
         print(f"\n[{i}/{len(links)}] Đang cào: {link}  (Đã lưu: {saved_count}/{target})")
 
-        # Tải video page với retry
-        page_loaded = False
-        for attempt in range(1, 4):
-            try:
-                driver.get(link)
-                time.sleep(2.5 + random.uniform(0, 1.5))
+        # Nếu TikTokApi đã có stats → dùng trực tiếp, không cần Selenium
+        clean_link = link.split('?')[0]
+        if clean_link in api_stats:
+            api_data = api_stats[clean_link]
+            stats = {
+                'Caption': api_data.get('caption', ''),
+                'Views': api_data.get('views', 0),
+                'Likes': api_data.get('likes', 0),
+                'Comments': api_data.get('comments', 0),
+                'Shares': api_data.get('shares', 0),
+                'Saves': api_data.get('saves', 0),
+                'Create_Time': str(api_data.get('create_time', 0)),
+            }
+            print(f"  [📊] Stats (từ TikTokApi): 👁️{stats['Views']:,} | ❤️{stats['Likes']:,} | 💬{stats['Comments']:,}")
+        else:
+            # Fallback: Selenium scrape
+            page_loaded = False
+            for attempt in range(1, 4):
+                try:
+                    driver.get(link)
+                    time.sleep(2.5 + random.uniform(0, 1.5))
 
-                if is_blocked(driver):
-                    if attempt < 3:
-                        print(f"  [⟳] Bị block khi tải video (attempt {attempt}/3). Chờ {5 * attempt}s...")
-                        time.sleep(5 * attempt)
-                        continue
-                    print(f"  [🚫] Bị block! Dừng cào — cần xoay vòng proxy.")
+                    if is_blocked(driver):
+                        if attempt < 3:
+                            print(f"  [⟳] Bị block khi tải video (attempt {attempt}/3). Chờ {5 * attempt}s...")
+                            time.sleep(5 * attempt)
+                            continue
+                        print(f"  [🚫] Bị block! Dừng cào — cần xoay vòng proxy.")
+                        break
+                    page_loaded = True
                     break
-                page_loaded = True
-                break
-            except Exception as e:
-                if attempt < 3:
-                    print(f"  [⟳] Lỗi tải video (attempt {attempt}/3): {str(e)[:80]}")
-                    time.sleep(3 * attempt)
-                    continue
-                print(f"  [!] Bỏ qua video sau 3 lần thử: {str(e)[:80]}")
+                except Exception as e:
+                    if attempt < 3:
+                        print(f"  [⟳] Lỗi tải video (attempt {attempt}/3): {str(e)[:80]}")
+                        time.sleep(3 * attempt)
+                        continue
+                    print(f"  [!] Bỏ qua video sau 3 lần thử: {str(e)[:80]}")
 
-        if not page_loaded:
-            if is_blocked(driver):
-                break  # Dừng toàn bộ vòng lặp
-            continue  # Bỏ qua video này, thử video tiếp
+            if not page_loaded:
+                if is_blocked(driver):
+                    break
+                continue
 
-        # Bóc tách các chỉ số cơ bản
-        stats = extract_basic_stats(driver.page_source)
+            # Bóc tách stats từ Selenium
+            stats = extract_basic_stats(driver.page_source)
 
-        # === KIỂM TRA DỮ LIỆU HỢP LỆ (Chống data rác làm hỏng model) ===
+        # === KIỂM TRA DỮ LIỆU HỢP LỆ ===
         views = stats.get('Views', 0)
         likes = stats.get('Likes', 0)
         comments_count = stats.get('Comments', 0)

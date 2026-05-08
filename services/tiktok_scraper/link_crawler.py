@@ -40,11 +40,13 @@ def _save_debug_snapshot(driver, label="debug"):
 def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
     """
     Thu thập link video từ hashtag page.
+    Trả về (links, stats_map) — stats_map chứa data từ TikTokApi.
 
     Ưu tiên: TikTokApi → Selenium DOM fallback.
     """
     buffer_target = target_count * BUFFER_MULTIPLIER
     links = []
+    stats_map = {}
 
     print(f"[*] Lướt tìm tối đa {buffer_target} link dự phòng (cần {target_count} video Việt)...")
 
@@ -69,9 +71,10 @@ def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
         if len(links) >= buffer_target:
             break
 
-    # === CHIẾN LƯỢC 2: TikTokApi (anti-bot) ===
+    # === CHIẾN LƯỢC 2: TikTokApi (anti-bot) — trả cả stats ===
     if not links:
-        raw_urls = fetch_hashtag_videos(tag, max_videos=buffer_target, driver=driver)
+        raw_urls, api_stats = fetch_hashtag_videos(tag, max_videos=buffer_target, driver=driver)
+        stats_map.update(api_stats)
         for url in raw_urls:
             video_id = extract_video_id(url)
             if video_id and not is_scraped(video_id):
@@ -166,4 +169,4 @@ def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
     else:
         print(f"[✓] Thu thập được {len(links)} link ứng viên.")
 
-    return links
+    return links, stats_map

@@ -63,7 +63,7 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
         return []
 
     async def _fetch():
-        video_urls = []
+        video_data = []  # List of (url, stats_dict)
         try:
             async with TikTokApi() as api:
                 create_kwargs = {
@@ -86,7 +86,20 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
                             url = f"https://www.tiktok.com/@{author_id}/video/{video_id}"
                         else:
                             url = f"https://www.tiktok.com/@_/video/{video_id}"
-                        video_urls.append(url)
+
+                        # Lấy stats trực tiếp từ TikTokApi
+                        stats = data.get("stats", {})
+                        video_info = {
+                            "caption": data.get("desc", ""),
+                            "views": stats.get("playCount", 0),
+                            "likes": stats.get("diggCount", 0),
+                            "comments": stats.get("commentCount", 0),
+                            "shares": stats.get("shareCount", 0),
+                            "saves": stats.get("collectCount", 0),
+                            "create_time": data.get("createTime", 0),
+                            "author": author_id,
+                        }
+                        video_data.append((url, video_info))
 
         except Exception as e:
             err_name = type(e).__name__
@@ -103,7 +116,7 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
             else:
                 print(f"  [!] TikTokApi: {err_name}: {err_msg}")
 
-        return video_urls
+        return video_data
 
     try:
         return asyncio.run(_fetch())
@@ -115,23 +128,19 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
             loop.close()
 
 
-def fetch_hashtag_videos(tag: str, max_videos: int = 90, driver=None, proxy: str = None) -> list[str]:
+def fetch_hashtag_videos(tag: str, max_videos: int = 90, driver=None, proxy: str = None) -> tuple[list[str], dict]:
     """
-    Thu thập video URLs từ TikTok hashtag bằng TikTokApi.
-
-    Args:
-        tag: Tên hashtag (không có #)
-        max_videos: Số video tối đa
-        driver: Selenium WebDriver (để lấy ms_token cookies)
-        proxy: Proxy URL (tùy chọn)
+    Thu thập video URLs + stats từ TikTok hashtag bằng TikTokApi.
 
     Returns:
-        list[str]: Danh sách video URLs (có thể rỗng).
+        tuple: (list[url], dict{url: stats_dict})
     """
     print(f"  [TikTokApi] Thử cho #{tag}...")
-    urls = fetch_via_tiktokapi(tag, max_videos=max_videos, driver=driver, proxy=proxy)
-    if urls:
-        print(f"  [✓] TikTokApi: Tìm thấy {len(urls)} video")
-        return urls
+    video_data = fetch_via_tiktokapi(tag, max_videos=max_videos, driver=driver, proxy=proxy)
+    if video_data:
+        urls = [item[0] for item in video_data]
+        stats_map = {item[0]: item[1] for item in video_data}
+        print(f"  [✓] TikTokApi: Tìm thấy {len(urls)} video (có stats)")
+        return urls, stats_map
     print("  [✗] TikTokApi thất bại.")
-    return []
+    return [], {}
