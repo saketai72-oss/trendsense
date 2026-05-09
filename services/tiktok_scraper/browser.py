@@ -21,7 +21,7 @@ except ImportError:
     uc = None  # type: ignore[assignment]
 
 # Ngăn lỗi "Exception ignored in: <function Chrome.__del__>" trên Windows
-if uc is not None and hasattr(uc.Chrome, '__del__'):
+if uc is not None and hasattr(uc, 'Chrome') and hasattr(uc.Chrome, '__del__'):
     _original_del = uc.Chrome.__del__
     def _safe_del(self):
         try:
@@ -125,7 +125,8 @@ def get_random_proxy() -> str | None:
 BLOCK_SIGNALS = [
     "robot", "captcha", "unusual traffic", "403", "access denied",
     "verify you are human", "security check", "just a moment",
-    "enable javascript", "tiktok.com/login",  # redirect to login = block
+    "enable javascript", "tiktok.com/login", "something went wrong",
+    "không thể tải", "vui lòng thử lại", "truy cập bị chặn",
 ]
 
 
@@ -372,7 +373,7 @@ def init_driver(proxy: str | None = None):
         if normalized:
             options.add_argument(f'--proxy-server={normalized}')
             display_proxy = normalized.split('@')[-1] if '@' in normalized else normalized
-            print(f"[🔀 PROXY] Đang dùng: {display_proxy}")
+            print(f"[*] [PROXY] Đang dùng: {display_proxy}")
         else:
             print(f"[!] Proxy không hợp lệ, chạy không proxy.")
     else:

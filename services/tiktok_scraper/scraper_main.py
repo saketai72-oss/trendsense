@@ -19,7 +19,7 @@ from core.config import service_settings as settings
 from services.tiktok_scraper.browser import init_driver, get_random_proxy, is_blocked
 from core.db.models import extract_video_id, mark_as_scraped, insert_video_metadata
 from services.tiktok_scraper.link_crawler import get_trending_links
-from services.tiktok_scraper.content_parser import extract_basic_stats, extract_top_comments
+from services.tiktok_scraper.content_parser import extract_basic_stats
 
 
 
@@ -182,7 +182,8 @@ def main():
         for attempt in range(1, 4):
             try:
                 driver.get(link)
-                time.sleep(2.5 + random.uniform(0, 1.5))
+                # Đợi trang ổn định và hydrate JSON
+                time.sleep(5.0 + random.uniform(0, 2.0))
 
                 if is_blocked(driver):
                     if attempt < 3:
@@ -205,9 +206,24 @@ def main():
         if page_loaded:
             # Bóc tách stats từ Selenium
             stats = extract_basic_stats(driver.page_source)
-            print(f"  [📊] Stats (từ Selenium): 👁️{stats.get('Views', 0):,} | ❤️{stats.get('Likes', 0):,} | 💬{stats.get('Comments', 0):,}")
+            
+            # NẾU Selenium parse lỗi (Views = 0) NHƯNG có data từ TikTokApi -> ƯU TIÊN dùng TikTokApi
+            if int(stats.get('Views', 0)) <= 0 and clean_link in api_stats:
+                api_data = api_stats[clean_link]
+                stats = {
+                    'Caption': api_data.get('caption', stats.get('Caption', '')),
+                    'Views': api_data.get('views', 0),
+                    'Likes': api_data.get('likes', 0),
+                    'Comments': api_data.get('comments', 0),
+                    'Shares': api_data.get('shares', 0),
+                    'Saves': api_data.get('saves', 0),
+                    'Create_Time': str(api_data.get('create_time', stats.get('Create_Time', '0'))),
+                }
+                print(f"  [📊] Stats (Selenium lỗi, dùng TikTokApi): 👁️{stats['Views']:,} | ❤️{stats['Likes']:,} | 💬{stats['Comments']:,}")
+            else:
+                print(f"  [📊] Stats (từ Selenium): 👁️{stats.get('Views', 0):,} | ❤️{stats.get('Likes', 0):,} | 💬{stats.get('Comments', 0):,}")
         else:
-            # Fallback sang TikTokApi nếu Selenium lỗi/bị block
+            # Fallback sang TikTokApi nếu Selenium hoàn toàn không tải được trang
             if clean_link in api_stats:
                 api_data = api_stats[clean_link]
                 stats = {
@@ -271,15 +287,7 @@ def main():
                 # Nếu caption chỉ toàn emoji hoặc số (không detect được) → cho qua
                 pass
 
-        # Bóc tách Top 5 bình luận (CHỈ chạy cho video đã qua bộ lọc ngôn ngữ)
-        top_5_comments = []
-        if page_loaded:
-            has_comments = comments_count > 0
-            top_5_comments = extract_top_comments(driver, has_comments)
-        else:
-            print("  [💬] Bỏ qua cào comment do chạy bằng Fallback TikTokApi.")
-
-        # 3. Đóng gói dữ liệu và ghi vào Postgres
+        # 3. Đóng gói dữ liệu và ghi vào Postgres (không cào bình luận)
         video_id = extract_video_id(link)
         if video_id:
             print(f"  [*] Đang xử lý ID {video_id}...")
@@ -297,15 +305,6 @@ def main():
                 'scrape_date': today,
             }
 
-            # Gắn top comments
-            for idx in range(5):
-                if idx < len(top_5_comments):
-                    video_data[f'top{idx+1}_cmt'] = top_5_comments[idx]['text']
-                    video_data[f'top{idx+1}_likes'] = top_5_comments[idx]['likes_num']
-                else:
-                    video_data[f'top{idx+1}_cmt'] = ""
-                    video_data[f'top{idx+1}_likes'] = 0
-
             # Ghi vào PostgreSQL
             success = insert_video_metadata(video_id, video_data)
             
@@ -317,7 +316,7 @@ def main():
                 mark_as_scraped(video_id)
                 
                 # 🚀 Nhỏ giọt: Gửi video này sang Modal AI Core xử lý
-                _trigger_ai_pipeline(video_id, link, video_data, top_5_comments)
+                _trigger_ai_pipeline(video_id, link, video_data, [])
             else:
                 print(f"  [!] Thất bại khi lưu video {video_id} vào DB. Sẽ không đánh dấu history.")
 

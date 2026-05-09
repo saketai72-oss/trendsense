@@ -3,6 +3,10 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
 from core.db.session import get_connection
 
+# Cache local để tránh query DB quá nhiều trong vòng lặp cào link
+_history_cache = set()
+_cache_initialized = False
+
 # ==========================================
 # SCHEMA INITIALIZATION
 # ==========================================
@@ -28,11 +32,6 @@ def init_db():
                     saves INTEGER DEFAULT 0,
                     create_time BIGINT DEFAULT 0,
                     scrape_date DATE DEFAULT CURRENT_DATE,
-                    top1_cmt TEXT, top1_likes INTEGER DEFAULT 0,
-                    top2_cmt TEXT, top2_likes INTEGER DEFAULT 0,
-                    top3_cmt TEXT, top3_likes INTEGER DEFAULT 0,
-                    top4_cmt TEXT, top4_likes INTEGER DEFAULT 0,
-                    top5_cmt TEXT, top5_likes INTEGER DEFAULT 0,
                     views_per_hour REAL DEFAULT 0,
                     engagement_rate REAL DEFAULT 0,
                     viral_velocity REAL DEFAULT 0,
@@ -154,72 +153,29 @@ def insert_video_metadata(video_id, data_dict):
             saves = int(data_dict.get('saves', 0))
             create_time = int(data_dict.get('create_time', 0))
 
-            # Kiểm tra xem có bình luận mới hay không
-            has_new_comments = any(
-                str(data_dict.get(f'top{i}_cmt', '')).strip() for i in range(1, 6)
-            )
-
-            if has_new_comments:
-                # Có bình luận mới → cập nhật cả comments và reset ai_status để phân tích lại
-                query = '''
-                    INSERT INTO videos (
-                        video_id, link, caption, views, likes, comments, shares, saves,
-                        create_time, scrape_date, ai_status,
-                        top1_cmt, top1_likes, top2_cmt, top2_likes,
-                        top3_cmt, top3_likes, top4_cmt, top4_likes,
-                        top5_cmt, top5_likes
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (video_id) DO UPDATE SET
-                        views = EXCLUDED.views,
-                        likes = EXCLUDED.likes,
-                        comments = EXCLUDED.comments,
-                        shares = EXCLUDED.shares,
-                        saves = EXCLUDED.saves,
-                        caption = EXCLUDED.caption,
-                        top1_cmt = EXCLUDED.top1_cmt,
-                        top1_likes = EXCLUDED.top1_likes,
-                        top2_cmt = EXCLUDED.top2_cmt,
-                        top2_likes = EXCLUDED.top2_likes,
-                        top3_cmt = EXCLUDED.top3_cmt,
-                        top3_likes = EXCLUDED.top3_likes,
-                        top4_cmt = EXCLUDED.top4_cmt,
-                        top4_likes = EXCLUDED.top4_likes,
-                        top5_cmt = EXCLUDED.top5_cmt,
-                        top5_likes = EXCLUDED.top5_likes,
-                        ai_status = 'pending'
-                '''
-            else:
-                # Không có bình luận mới → chỉ cập nhật stats cơ bản, giữ nguyên comments cũ
-                query = '''
-                    INSERT INTO videos (
-                        video_id, link, caption, views, likes, comments, shares, saves,
-                        create_time, scrape_date, ai_status,
-                        top1_cmt, top1_likes, top2_cmt, top2_likes,
-                        top3_cmt, top3_likes, top4_cmt, top4_likes,
-                        top5_cmt, top5_likes
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (video_id) DO UPDATE SET
-                        views = EXCLUDED.views,
-                        likes = EXCLUDED.likes,
-                        comments = EXCLUDED.comments,
-                        shares = EXCLUDED.shares,
-                        saves = EXCLUDED.saves,
-                        caption = EXCLUDED.caption
-                '''
+            query = '''
+                INSERT INTO videos (
+                    video_id, link, caption, views, likes, comments, shares, saves,
+                    create_time, scrape_date, ai_status
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                ON CONFLICT (video_id) DO UPDATE SET
+                    views = EXCLUDED.views,
+                    likes = EXCLUDED.likes,
+                    comments = EXCLUDED.comments,
+                    shares = EXCLUDED.shares,
+                    saves = EXCLUDED.saves,
+                    caption = EXCLUDED.caption
+            '''
 
             cursor.execute(query, (
                 video_id, data_dict.get('link', ''), data_dict.get('caption', ''),
                 views, likes, comments, shares, saves, create_time,
-                data_dict.get('scrape_date', datetime.now().date().isoformat()),
-                data_dict.get('top1_cmt', ''), int(data_dict.get('top1_likes', 0)),
-                data_dict.get('top2_cmt', ''), int(data_dict.get('top2_likes', 0)),
-                data_dict.get('top3_cmt', ''), int(data_dict.get('top3_likes', 0)),
-                data_dict.get('top4_cmt', ''), int(data_dict.get('top4_likes', 0)),
-                data_dict.get('top5_cmt', ''), int(data_dict.get('top5_likes', 0))
+                data_dict.get('scrape_date', datetime.now().date().isoformat())
             ))
             conn.commit()
             return True
     except Exception as e:
+        print(f"[ERROR] Failed to insert video {video_id}: {e}")
         conn.rollback()
         return False
     finally:
@@ -243,13 +199,12 @@ def delete_video(video_id):
         conn.close()
 
 def get_all_video_links():
-    """Lấy toàn bộ link video và bình luận hiện có để phục vụ detect language fallback"""
+    """Lấy toàn bộ link video để phục vụ detect language fallback (không cần bình luận)"""
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("""
-                SELECT video_id, link, caption, 
-                       top1_cmt, top2_cmt, top3_cmt, top4_cmt, top5_cmt 
+                SELECT video_id, link, caption
                 FROM videos 
                 ORDER BY scrape_date DESC
             """)
@@ -304,11 +259,6 @@ def update_rescraped_metadata(video_id, data_dict):
                     caption = %s, views = %s, likes = %s, comments = %s,
                     shares = %s, saves = %s, create_time = %s,
                     scrape_date = %s, is_rescraped = TRUE,
-                    top1_cmt = %s, top1_likes = %s,
-                    top2_cmt = %s, top2_likes = %s,
-                    top3_cmt = %s, top3_likes = %s,
-                    top4_cmt = %s, top4_likes = %s,
-                    top5_cmt = %s, top5_likes = %s,
                     ai_status = 'pending'
                 WHERE video_id = %s
             '''
@@ -321,11 +271,6 @@ def update_rescraped_metadata(video_id, data_dict):
                 int(data_dict.get('saves', 0)),
                 int(data_dict.get('create_time', 0)),
                 data_dict.get('scrape_date', datetime.now().date().isoformat()),
-                data_dict.get('top1_cmt', ''), int(data_dict.get('top1_likes', 0)),
-                data_dict.get('top2_cmt', ''), int(data_dict.get('top2_likes', 0)),
-                data_dict.get('top3_cmt', ''), int(data_dict.get('top3_likes', 0)),
-                data_dict.get('top4_cmt', ''), int(data_dict.get('top4_likes', 0)),
-                data_dict.get('top5_cmt', ''), int(data_dict.get('top5_likes', 0)),
                 video_id
             ))
             conn.commit()
@@ -380,6 +325,30 @@ def update_viral_metrics_only(video_id, res):
         conn.close()
 
 def is_scraped(video_id):
+    global _cache_initialized, _history_cache
+    
+    # Khởi tạo cache nếu chưa có (chỉ làm 1 lần mỗi session)
+    if not _cache_initialized:
+        conn = get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT video_id FROM history')
+                rows = cursor.fetchall()
+                _history_cache = set(row[0] for row in rows)
+                _cache_initialized = True
+                print(f"  [📦] Đã load {len(_history_cache)} video cũ vào cache history.")
+        except Exception as e:
+            print(f"  [!] Lỗi load history cache: {e}")
+            # Nếu lỗi thì fallback về query trực tiếp
+            pass
+        finally:
+            conn.close()
+
+    # Kiểm tra trong cache trước
+    if _cache_initialized:
+        return video_id in _history_cache
+
+    # Fallback nếu cache chưa init được
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
@@ -389,11 +358,14 @@ def is_scraped(video_id):
         conn.close()
 
 def mark_as_scraped(video_id):
+    global _history_cache
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute('INSERT INTO history (video_id) VALUES (%s) ON CONFLICT DO NOTHING', (video_id,))
             conn.commit()
+            # Cập nhật cả cache local
+            _history_cache.add(video_id)
     finally:
         conn.close()
 

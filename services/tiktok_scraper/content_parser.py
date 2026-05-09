@@ -1,18 +1,18 @@
 import re
 import json
-import time
-import random
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
-from services.tiktok_scraper.utils import parse_like_count
-from services.tiktok_scraper.captcha import solve_rotate_captcha
 
+def _safe_int(value, default=0):
+    """Chuyển đổi an toàn sang int"""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
 
 def _extract_video_json(html):
     """
     Trích xuất dữ liệu JSON nhúng từ HTML TikTok.
     TikTok luôn nhúng toàn bộ data vào thẻ script đặc biệt.
-    Trả về dict chứa thông tin video chính xác (không bị lẫn video khác).
+    Trả về dict chứa thông tin video chính xác.
     """
     # Phương pháp 1: __UNIVERSAL_DATA_FOR_REHYDRATION__ (TikTok hiện tại)
     pattern = r'<script\s+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>'
@@ -20,15 +20,22 @@ def _extract_video_json(html):
     if match:
         try:
             data = json.loads(match.group(1))
+            # Thử lấy từ __DEFAULT_SCOPE__
             scope = data.get("__DEFAULT_SCOPE__", {})
+            
+            # Ưu tiên webapp.video-detail (trang detail)
+            video_detail = scope.get("webapp.video-detail") or scope.get("webapp.videoDetail")
+            if video_detail:
+                item = video_detail.get("itemInfo", {}).get("itemStruct")
+                if item and item.get("id"):
+                    return item
 
-            # Đường dẫn đến video detail trong JSON
-            video_detail = scope.get("webapp.video-detail", {})
-            item_info = video_detail.get("itemInfo", {})
-            item = item_info.get("itemStruct", {})
-
-            if item and item.get("id"):
-                return item
+            # Thử tìm trực tiếp trong scope nếu là cấu trúc khác
+            for key, val in scope.items():
+                if isinstance(val, dict) and "itemInfo" in val:
+                    item = val["itemInfo"].get("itemStruct")
+                    if item and item.get("id"):
+                        return item
         except (json.JSONDecodeError, KeyError, TypeError):
             pass
 
@@ -38,26 +45,85 @@ def _extract_video_json(html):
     if match2:
         try:
             data = json.loads(match2.group(1))
-            # Trong SIGI_STATE, video data nằm ở ItemModule
             item_module = data.get("ItemModule", {})
             if item_module:
-                # Lấy video đầu tiên (video chính đang xem)
+                # Lấy video đầu tiên
                 for vid_id, item in item_module.items():
                     if isinstance(item, dict) and item.get("id"):
                         return item
         except (json.JSONDecodeError, KeyError, TypeError):
             pass
 
+    # Phương pháp 3: __NEXT_DATA__
+    pattern3 = r'<script\s+id="__NEXT_DATA__"[^>]*>(.*?)</script>'
+    match3 = re.search(pattern3, html, re.DOTALL)
+    if match3:
+        try:
+            data = json.loads(match3.group(1))
+            props = data.get("props", {}).get("pageProps", {})
+            item = props.get("itemInfo", {}).get("itemStruct")
+            if item and item.get("id"):
+                return item
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
     return None
 
+def _extract_stats_regex_safe(html):
+    """
+    Fallback: Dùng regex nhưng AN TOÀN hơn.
+    """
+    def get_first_match(patterns, text):
+        """Thử nhiều pattern, lấy giá trị hợp lệ đầu tiên"""
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                try:
+                    val = match.group(1)
+                    # Nếu là digit -> trả về
+                    if val.isdigit():
+                        return val
+                    # Nếu là string số trong quotes -> trả về
+                    clean_val = val.strip('"\'')
+                    if clean_val.isdigit():
+                        return clean_val
+                except (ValueError, IndexError):
+                    pass
+        return "0"
 
-def _safe_int(value, default=0):
-    """Chuyển đổi an toàn sang int"""
+    # TikTok stats keys can be quoted or not, and values can be strings or numbers
+    views_patterns = [r'"playCount"\s*:\s*"?(\d+)"?', r'"play_count"\s*:\s*"?(\d+)"?']
+    likes_patterns = [r'"diggCount"\s*:\s*"?(\d+)"?', r'"likeCount"\s*:\s*"?(\d+)"?']
+    comments_patterns = [r'"commentCount"\s*:\s*"?(\d+)"?']
+    shares_patterns = [r'"shareCount"\s*:\s*"?(\d+)"?']
+    saves_patterns = [r'"collectCount"\s*:\s*"?(\d+)"?']
+    time_patterns = [r'"createTime"\s*:\s*"?(\d+)"?', r'"create_time"\s*:\s*"?(\d+)"?']
+
+    caption = "Không tìm thấy"
     try:
-        return int(value)
-    except (ValueError, TypeError):
-        return default
+        # Thử tìm caption trong "desc"
+        desc_match = re.search(r'"desc"\s*:\s*"(.*?)"\s*,\s*"createTime"', html)
+        if desc_match:
+            caption = desc_match.group(1).encode().decode('unicode_escape', errors='ignore')
+        else:
+            # Fallback string slicing if regex fails
+            start = html.find('"desc":"') + len('"desc":"')
+            if start > 7:
+                end = html.find('"', start)
+                if end > start:
+                    caption = html[start:end]
+    except Exception:
+        pass
 
+    return {
+        'Caption': caption,
+        'Views': _safe_int(get_first_match(views_patterns, html)),
+        'Likes': _safe_int(get_first_match(likes_patterns, html)),
+        'Comments': _safe_int(get_first_match(comments_patterns, html)),
+        'Shares': _safe_int(get_first_match(shares_patterns, html)),
+        'Saves': _safe_int(get_first_match(saves_patterns, html)),
+        'Create_Time': get_first_match(time_patterns, html),
+    }
 
 def extract_basic_stats(html):
     """
@@ -82,110 +148,3 @@ def extract_basic_stats(html):
     # === FALLBACK: Regex nhưng chỉ trên block JSON đầu tiên ===
     print("  [!] Không parse được JSON nhúng, dùng fallback regex (giới hạn block đầu tiên)...")
     return _extract_stats_regex_safe(html)
-
-
-def _extract_stats_regex_safe(html):
-    """
-    Fallback: Dùng regex nhưng AN TOÀN hơn cách cũ.
-    Thay vì findall + max toàn trang, chỉ lấy GIÁ TRỊ ĐẦU TIÊN tìm thấy.
-    Giá trị đầu tiên trong HTML thường là video chính (server render).
-    """
-    def get_first_match(pattern, text):
-        """Lấy giá trị ĐẦU TIÊN khớp pattern (không phải max)"""
-        match = re.search(pattern, text)
-        if match:
-            try:
-                return str(int(match.group(1)))
-            except (ValueError, IndexError):
-                pass
-        return "0"
-
-    caption = "Không tìm thấy"
-    try:
-        start = html.find('"desc":"') + len('"desc":"')
-        end = html.find('","createTime"', start)
-        if start > 7 and end > start:
-            caption = html[start:end]
-    except Exception:
-        pass
-
-    return {
-        'Caption': caption,
-        'Views': _safe_int(get_first_match(r'"playCount"\s*:\s*"?(\d+)"?', html)),
-        'Likes': _safe_int(get_first_match(r'"diggCount"\s*:\s*"?(\d+)"?', html)),
-        'Comments': _safe_int(get_first_match(r'"commentCount"\s*:\s*"?(\d+)"?', html)),
-        'Shares': _safe_int(get_first_match(r'"shareCount"\s*:\s*"?(\d+)"?', html)),
-        'Saves': _safe_int(get_first_match(r'"collectCount"\s*:\s*"?(\d+)"?', html)),
-        'Create_Time': get_first_match(r'"createTime"\s*:\s*"?(\d+)"?', html),
-    }
-
-
-def extract_top_comments(driver, has_comments_to_load):
-    try:
-        comment_btn = driver.find_element(By.CSS_SELECTOR, "[data-e2e='comment-icon']")
-        ActionChains(driver).move_to_element(comment_btn).perform()
-        time.sleep(random.uniform(0.8, 2.5)) 
-        driver.execute_script("arguments[0].click();", comment_btn)
-        time.sleep(random.uniform(2.0, 4.0)) 
-    except Exception: pass
-
-    print("  [*] Đang tải bình luận...")
-    comments_loaded = False
-    for _ in range(7):
-        time.sleep(1)
-        if driver.find_elements(By.CSS_SELECTOR, "[data-e2e='comment-level-1']"):
-            comments_loaded = True
-            break
-            
-    if not comments_loaded and has_comments_to_load: 
-        print("  [!] Đụng Captcha Xoay Hình...")
-        solve_rotate_captcha(driver)
-        
-        # --- THÊM ĐOẠN NÀY ĐỂ ÉP ĐỢI ---
-        print("  [*] Giải xong! Đang chờ TikTok duyệt và tải bình luận...")
-        time.sleep(5) # Bắt buộc phải cho nó 5 giây để load comment ra màn hình
-        
-        # Kiểm tra lại xem comment đã thực sự hiện ra chưa
-        if not driver.find_elements(By.CSS_SELECTOR, "[data-e2e='comment-level-1']"):
-            print("  [!] TikTok vẫn chặn hoặc mạng lỗi, bỏ qua video này.")
-            return [] # Trả về list rỗng, không cào nữa
-
-    for _ in range(4): 
-        current_comments = driver.find_elements(By.CSS_SELECTOR, "[data-e2e='comment-level-1']")
-        if current_comments:
-            try:
-                driver.execute_script("arguments[0].scrollIntoView(true);", current_comments[-1])
-                time.sleep(random.uniform(1.2, 3.1)) 
-            except Exception: break
-
-    comments_data = []
-    try:
-        for cmt in driver.find_elements(By.CSS_SELECTOR, "[data-e2e='comment-level-1']"):
-            c_text = cmt.text
-            if not c_text.strip(): continue 
-
-            c_like_num = 0
-            try:
-                wrapper = cmt.find_element(By.XPATH, "../../..")
-                lines = wrapper.text.split('\n')
-                for line in reversed(lines[-3:]):
-                    num = parse_like_count(line)
-                    if num > 0:
-                        c_like_num = num
-                        break
-                comments_data.append({"text": c_text.replace('\n', ' '), "likes_num": c_like_num})
-            except Exception: pass
-    except Exception: pass
-        
-    comments_data.sort(key=lambda x: x["likes_num"], reverse=True)
-    
-    unique_comments = []
-    seen_texts = set()
-    for item in comments_data:
-        if item["text"] not in seen_texts:
-            unique_comments.append(item)
-            seen_texts.add(item["text"])
-            
-    top_5 = unique_comments[:5]
-    print(f"  [>] Kết quả: Thu hoạch được {len(top_5)} bình luận hợp lệ.")
-    return top_5
