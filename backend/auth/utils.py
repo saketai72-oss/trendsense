@@ -1,9 +1,14 @@
+"""
+Authentication Utilities — Password Hashing & JWT Tokens
+=========================================================
+Production-grade auth utilities using bcrypt + PyJWT.
+"""
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-import bcrypt
 import jwt
+from passlib.context import CryptContext
 
 from core.config.backend_settings import (
     JWT_SECRET_KEY,
@@ -13,19 +18,21 @@ from core.config.backend_settings import (
 )
 
 # ── Password Hashing ─────────────────────────────────────────────────────────
-# Dùng bcrypt trực tiếp (tránh xung đột passlib vs bcrypt>=4.0.0 trên Python 3.12)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
 def hash_password(password: str) -> str:
     """Hash a plain-text password using bcrypt."""
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain-text password against its bcrypt hash."""
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 # ── JWT Token Creation ───────────────────────────────────────────────────────
-def create_access_token(user_id: str, email: str, extra_claims: dict = None) -> str:
+def create_access_token(user_id: str, email: str, extra_claims: dict | None = None) -> str:
     """
     Create a short-lived JWT access token.
 

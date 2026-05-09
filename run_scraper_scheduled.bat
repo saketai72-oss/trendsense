@@ -10,5 +10,6 @@
 
 cd /d "%~dp0"
 set PYTHONIOENCODING=utf-8
+set PYTHONUNBUFFERED=1
 call venv\Scripts\activate.bat
 python -m services.tiktok_scraper.scraper_main >> logs\scraper.log 2>&1
