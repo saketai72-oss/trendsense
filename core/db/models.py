@@ -42,23 +42,18 @@ def init_db():
                     category TEXT[],
                     video_description TEXT,
                     ai_status VARCHAR(20) DEFAULT 'pending',
-                    is_rescraped BOOLEAN DEFAULT FALSE
+                    is_rescraped BOOLEAN DEFAULT FALSE,
+                    audio_transcript TEXT
                 )
             ''')
-            # Trend Alignment Score columns (kept for backward compat during migration)
+            # Only keep audio_transcript column (others dropped)
             for col_sql in [
-                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS video_duration REAL",
-                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS video_orientation VARCHAR(10)",
-                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS scene_cut_count INTEGER",
-                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS trend_alignment_score REAL",
-                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS trend_insights JSONB",
                 "ALTER TABLE videos ADD COLUMN IF NOT EXISTS audio_transcript TEXT",
-                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS user_id UUID",
             ]:
                 try:
                     cursor.execute(col_sql)
                 except Exception:
-                    pass  # Column may already exist
+                    pass
 
             # ── Users table ──
             cursor.execute('''
@@ -94,6 +89,10 @@ def init_db():
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     video_id TEXT UNIQUE NOT NULL,
                     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                    caption TEXT,
+                    storage_path TEXT,
+                    link TEXT,
+                    scrape_date DATE DEFAULT CURRENT_DATE,
                     video_duration REAL,
                     video_orientation VARCHAR(10),
                     scene_cut_count INTEGER,
@@ -288,7 +287,12 @@ def get_high_potential_videos(threshold=40.0):
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("""
-                SELECT * FROM videos 
+                SELECT
+                    video_id, link, caption, views, likes, comments, shares, saves,
+                    create_time, scrape_date, views_per_hour, engagement_rate, viral_velocity,
+                    positive_score, video_sentiment, top_keywords, viral_probability, category,
+                    video_description, ai_status, is_rescraped, audio_transcript
+                FROM videos 
                 WHERE viral_probability > %s OR engagement_rate > %s
                 ORDER BY viral_probability DESC
             """, (threshold, threshold))
@@ -387,7 +391,16 @@ def get_pending_videos():
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT * FROM videos WHERE ai_status = 'pending' AND views > 0 ORDER BY scrape_date DESC")
+            cursor.execute("""
+                SELECT
+                    video_id, link, caption, views, likes, comments, shares, saves,
+                    create_time, scrape_date, views_per_hour, engagement_rate, viral_velocity,
+                    positive_score, video_sentiment, top_keywords, viral_probability, category,
+                    video_description, ai_status, is_rescraped, audio_transcript
+                FROM videos
+                WHERE ai_status = 'pending' AND views > 0
+                ORDER BY scrape_date DESC
+            """)
             return cursor.fetchall()
     finally:
         conn.close()
@@ -436,10 +449,8 @@ def get_videos_for_vision_analysis():
                 LIMIT 50
             """)
             rows = cursor.fetchall()
-            # Ở môi trường local, video được tải về thư mục 'downloads/'
             import os
             for r in rows:
-                # Type safe: video_id is str
                 r['video_path'] = os.path.abspath(f"downloads/{r['video_id']}.mp4")
             return rows
     finally:
@@ -453,27 +464,18 @@ def update_vision_results(video_id: str, summary: str, category: str | None = No
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # Nếu chỉ có summary là chuỗi lỗi (truyền 2 tham số)
             if category is None:
                 cursor.execute("UPDATE videos SET ai_status = 'error', video_description = %s WHERE video_id = %s", (summary, video_id))
             else:
-                import json
-                trend_insights = json.dumps({
-                    "ocr_text": ocr,
-                    "blip_caption": blip
-                }, ensure_ascii=False)
-                
                 cat_list = [c.strip() for c in category.split('|')] if category else []
-                
                 cursor.execute("""
                     UPDATE videos SET
                         video_description = %s,
                         category = %s,
                         audio_transcript = %s,
-                        trend_insights = %s,
                         ai_status = 'completed'
                     WHERE video_id = %s
-                """, (summary, cat_list, transcript, trend_insights, video_id))
+                """, (summary, cat_list, transcript, video_id))
             conn.commit()
     finally:
         conn.close()
@@ -483,11 +485,9 @@ def get_recent_videos(days=14):
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            # Chỉ lấy các cột cần thiết cho Training để tránh timeout và tốn RAM
             columns = [
-                "video_id", "views", "likes", "comments", "shares", "saves", 
-                "viral_velocity", "views_per_hour", "positive_score", 
-                "video_duration", "scene_cut_count", "video_orientation", 
+                "video_id", "views", "likes", "comments", "shares", "saves",
+                "viral_velocity", "views_per_hour", "positive_score",
                 "category", "top_keywords"
             ]
             query = f"SELECT {', '.join(columns)} FROM videos WHERE scrape_date >= %s AND ai_status = 'completed' AND views > 0"
@@ -528,7 +528,6 @@ def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
                 params.append(sentiment)
             if semantic_video_ids is not None:
                 if len(semantic_video_ids) == 0:
-                    # Semantic search yielded no results
                     where_clauses.append("1=0")
                 else:
                     where_clauses.append("video_id = ANY(%s)")
@@ -551,8 +550,6 @@ def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
             total = count_row["total"] if count_row else 0
 
             offset = (page - 1) * per_page
-            # Khi có semantic search, giữ nguyên thứ tự cosine similarity
-            # thay vì ghi đè bằng sort_by (mặc định viral_probability)
             if semantic_video_ids is not None and len(semantic_video_ids) > 0:
                 order_clause = "array_position(%s::text[], video_id)"
                 cur.execute(f"SELECT * FROM videos WHERE {where_sql} ORDER BY {order_clause} LIMIT %s OFFSET %s", params + [semantic_video_ids, per_page, offset])
@@ -566,7 +563,44 @@ def get_video_by_id(video_id: str):
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM videos WHERE video_id = %s", (video_id,))
+            # Try videos table first (scraped)
+            cur.execute("""
+                SELECT
+                    video_id, link, caption, views, likes, comments, shares, saves,
+                    create_time, scrape_date, views_per_hour, engagement_rate, viral_velocity,
+                    positive_score, video_sentiment, top_keywords, viral_probability, category,
+                    video_description, ai_status, is_rescraped, audio_transcript
+                FROM videos
+                WHERE video_id = %s
+            """, (video_id,))
+            row = cur.fetchone()
+            if row:
+                return row
+            # If not found, try video_analyses (user uploads)
+            cur.execute("""
+                SELECT 
+                    va.video_id, 
+                    va.link, 
+                    va.caption, 
+                    0 as views, 0 as likes, 0 as comments, 0 as shares, 0 as saves,
+                    0 as create_time, 
+                    va.scrape_date, 
+                    0 as views_per_hour, 0 as engagement_rate, 0 as viral_velocity,
+                    COALESCE(va.positive_score, 0) as positive_score,
+                    COALESCE(va.video_sentiment, 'pending') as video_sentiment,
+                    COALESCE(va.top_keywords, '') as top_keywords,
+                    0 as viral_probability,
+                    COALESCE(va.category, '{}'::TEXT[]) as category,
+                    COALESCE(va.video_description, '') as video_description,
+                    va.ai_status,
+                    FALSE as is_rescraped,
+                    va.video_duration, va.video_orientation, va.scene_cut_count,
+                    va.trend_alignment_score, va.trend_insights, va.audio_transcript,
+                    va.user_id,
+                    NULL::vector as embedding
+                FROM video_analyses va
+                WHERE va.video_id = %s
+            """, (video_id,))
             return cur.fetchone()
     finally:
         conn.close()
@@ -646,13 +680,31 @@ def insert_user_video(video_id: str, url: str, user_id: str | None = None):
     finally:
         conn.close()
 
+def insert_user_upload_analysis(video_id: str, storage_path: str, user_id: str, caption: str = ""):
+    """Insert a user-uploaded video record directly into video_analyses table."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO video_analyses (
+                    video_id, user_id, caption, storage_path, ai_status,
+                    created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, 'user_pending', NOW(), NOW())
+                ON CONFLICT (video_id) DO NOTHING
+            """, (video_id, user_id, caption, storage_path))
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
 
 # ==========================================
 # TREND ALIGNMENT BENCHMARK QUERIES
 # ==========================================
 
 def get_trending_categories(days=14):
-    """Top categories theo avg viral_velocity trong N ngày gần nhất."""
     cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
     conn = get_connection()
     try:
@@ -674,7 +726,6 @@ def get_trending_categories(days=14):
 
 
 def get_trending_keywords(days=14, limit=50):
-    """Top keywords từ video viral (velocity > median) trong N ngày gần nhất."""
     cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
     conn = get_connection()
     try:
@@ -703,7 +754,6 @@ def get_trending_keywords(days=14, limit=50):
 
 
 def get_duration_stats_by_category(days=14):
-    """Thống kê MEDIAN duration của video viral vs tất cả, theo category."""
     cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
     conn = get_connection()
     try:
@@ -730,7 +780,6 @@ def get_duration_stats_by_category(days=14):
 
 
 def get_viral_audio_transcripts(days=14, limit=30):
-    """Lấy audio transcript của top video viral gần nhất."""
     cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
     conn = get_connection()
     try:
@@ -753,13 +802,10 @@ def get_viral_audio_transcripts(days=14, limit=30):
 
 
 def update_upload_analysis(video_id, results):
-    """Cập nhật kết quả Trend Alignment Score cho video upload.
-    Writes to video_analyses table (split from videos)."""
     import json
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            # Upsert into video_analyses
             cur.execute("""
                 INSERT INTO video_analyses (
                     video_id, user_id, category, video_description, top_keywords,
@@ -801,7 +847,6 @@ def update_upload_analysis(video_id, results):
                 results.get('ai_status', 'completed'),
             ))
 
-            # Also update ai_status on videos table for Supabase Realtime
             cur.execute(
                 "UPDATE videos SET ai_status = %s WHERE video_id = %s",
                 (results.get('ai_status', 'completed'), video_id)
@@ -821,7 +866,6 @@ def update_upload_analysis(video_id, results):
 def create_user(email: str, password_hash: str | None = None, display_name: str | None = None,
                 avatar_url: str | None = None, auth_provider: str = "local",
                 provider_id: str | None = None):
-    """Create a new user. Returns the user dict or None on failure."""
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -843,7 +887,6 @@ def create_user(email: str, password_hash: str | None = None, display_name: str 
 
 
 def get_user_by_id(user_id: str | None):
-    """Get user by UUID."""
     if not user_id:
         return None
     conn = get_connection()
@@ -857,7 +900,6 @@ def get_user_by_id(user_id: str | None):
 
 
 def get_user_by_email(email: str | None):
-    """Get user by email address."""
     if not email:
         return None
     conn = get_connection()
@@ -871,7 +913,6 @@ def get_user_by_email(email: str | None):
 
 
 def get_user_by_provider(provider: str, provider_id: str):
-    """Get user by OAuth provider and provider ID."""
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -886,7 +927,6 @@ def get_user_by_provider(provider: str, provider_id: str):
 
 
 def update_user_login(user_id: str | None):
-    """Update the user's last activity timestamp."""
     if not user_id:
         return
     conn = get_connection()
@@ -904,7 +944,6 @@ def update_user_login(user_id: str | None):
 
 
 def link_oauth_provider(user_id: str | None, provider: str, provider_id: str, avatar_url: str | None = None):
-    """Link an OAuth provider to an existing user account."""
     if not user_id:
         return
     conn = get_connection()
@@ -928,7 +967,6 @@ def link_oauth_provider(user_id: str | None, provider: str, provider_id: str, av
 # ── Refresh Token Management ─────────────────────────────────────────────────
 
 def store_refresh_token(user_id: str, token_hash: str, expires_at):
-    """Store a hashed refresh token in the database."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -945,7 +983,6 @@ def store_refresh_token(user_id: str, token_hash: str, expires_at):
 
 
 def get_refresh_token(token_hash: str):
-    """Get a refresh token by its hash."""
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -960,7 +997,6 @@ def get_refresh_token(token_hash: str):
 
 
 def revoke_refresh_token(token_hash: str):
-    """Revoke a single refresh token."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -976,7 +1012,6 @@ def revoke_refresh_token(token_hash: str):
 
 
 def revoke_all_user_tokens(user_id: str):
-    """Revoke all refresh tokens for a user (logout from all devices)."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -992,7 +1027,6 @@ def revoke_all_user_tokens(user_id: str):
 
 
 def cleanup_expired_tokens():
-    """Delete expired and revoked refresh tokens (run periodically)."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -1009,7 +1043,6 @@ def cleanup_expired_tokens():
 # ── Video Analyses Queries ───────────────────────────────────────────────────
 
 def get_video_analysis(video_id: str):
-    """Get upload analysis results for a video from video_analyses table."""
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -1021,27 +1054,26 @@ def get_video_analysis(video_id: str):
 
 
 def get_user_videos(user_id: str, page: int = 1, per_page: int = 20):
-    """Get paginated list of videos uploaded by a user with full analysis results."""
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             offset = (page - 1) * per_page
             cur.execute("""
-                SELECT v.video_id, v.link, v.caption, v.scrape_date, v.ai_status,
-                       va.trend_alignment_score, va.video_sentiment, va.category,
-                       va.video_description, va.positive_score, va.created_at as analyzed_at,
-                       va.video_duration, va.video_orientation, va.scene_cut_count,
-                       va.trend_insights, va.audio_transcript, va.top_keywords
-                FROM videos v
-                LEFT JOIN video_analyses va ON v.video_id = va.video_id
-                WHERE v.user_id = %s
-                ORDER BY v.scrape_date DESC
+                SELECT 
+                    video_id, link, caption, scrape_date, ai_status,
+                    trend_alignment_score, video_sentiment, category,
+                    video_description, positive_score, created_at as analyzed_at,
+                    video_duration, video_orientation, scene_cut_count,
+                    trend_insights, audio_transcript, top_keywords
+                FROM video_analyses
+                WHERE user_id = %s
+                ORDER BY scrape_date DESC
                 LIMIT %s OFFSET %s
             """, (user_id, per_page, offset))
             rows = cur.fetchall()
 
             cur.execute(
-                "SELECT COUNT(*) as total FROM videos WHERE user_id = %s",
+                "SELECT COUNT(*) as total FROM video_analyses WHERE user_id = %s",
                 (user_id,)
             )
             count_row = cur.fetchone()
@@ -1053,16 +1085,11 @@ def get_user_videos(user_id: str, page: int = 1, per_page: int = 20):
 
 
 def delete_user_video(video_id: str, user_id: str) -> bool:
-    """Delete a video and its analysis. Only deletes if the video belongs to the user."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM video_analyses WHERE video_id = %s AND user_id = %s",
-                (video_id, user_id)
-            )
-            cur.execute(
-                "DELETE FROM videos WHERE video_id = %s AND user_id = %s",
                 (video_id, user_id)
             )
             conn.commit()

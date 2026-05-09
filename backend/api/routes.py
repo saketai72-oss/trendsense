@@ -24,7 +24,7 @@ from core.db.models import (
     get_all_analyzed_videos, get_video_by_id,
     get_dashboard_stats, get_category_stats,
     get_sentiment_stats, get_top_keywords,
-    get_timeline_data, insert_user_video,
+    get_timeline_data, insert_user_video, insert_user_upload_analysis,
     get_video_analysis, get_user_videos,
     delete_user_video,
 )
@@ -179,11 +179,6 @@ def get_upload_url(body: UploadUrlRequest, user: dict = Depends(get_current_user
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi tạo upload URL: {str(e)[:100]}")
 
-    # Pre-insert vào DB với user_id để frontend có thể poll ngay
-    try:
-        insert_user_video(video_id, f"supabase://{storage_path}", user_id=user_id)
-    except Exception:
-        pass
 
     return {
         "video_id": video_id,
@@ -231,6 +226,15 @@ def analyze_video(request: Request, body: AnalyzeRequest, user: dict = Depends(g
         download_url = create_download_url(storage_path, expires_in=3600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi tạo download URL: {str(e)[:100]}")
+
+    user_id = str(user["id"])
+
+    # Insert into video_analyses (user uploads only)
+    try:
+        insert_user_upload_analysis(video_id, storage_path, user_id, body.caption or "")
+    except Exception:
+        # If already exists, ignore
+        pass
 
     payload = {
         "video_id": video_id,

@@ -1,0 +1,14 @@
+{
+  "accuracy": 0.9689119170984456,
+  "features": [
+    "Like_Rate",
+    "Comment_Rate",
+    "Share_Rate",
+    "Save_Rate",
+    "Positive_Score",
+    "Views_Per_Hour"
+  ],
+  "samples": 1928,
+  "trained_at": "2026-05-10T00:10:44.472542",
+  "model_file": "rf_model.joblib"
+}

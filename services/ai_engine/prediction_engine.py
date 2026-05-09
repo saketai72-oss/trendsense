@@ -77,7 +77,13 @@ def run_viral_prediction(df):
     try:
         probabilities = model.predict_proba(X)[:, 1]
         df_recent['viral_probability'] = np.round(probabilities * 100, 2)
-        print(f"[✓] Đã predict xác suất viral cho {len(df_recent)} video.")
+        # Cap at 99.9% to avoid unrealistic 100% predictions (model overconfidence)
+        df_recent['viral_probability'] = np.clip(df_recent['viral_probability'], 0, 99.9)
+        # Log if any video gets >99% after capping (indicates model overconfidence)
+        high_count = (df_recent['viral_probability'] > 99).sum()
+        if high_count > 0:
+            print(f"[!] CẢNH BÁO: {high_count} video có xác suất viral >99% (đã capping). Có thể model bị overfit.")
+        print(f"[✓] Đã predict xác suất viral cho {len(df_recent)} video (capped at 99.9%).")
     except Exception as e:
         print(f"[!] Lỗi khi predict: {e}")
         print("    → Model có thể không tương thích. Chạy lại train_model.py.")
