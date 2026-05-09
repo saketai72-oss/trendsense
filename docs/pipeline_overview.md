@@ -1,6 +1,6 @@
 # 🎯 Tổng Quan Pipeline Dự Án TrendSense
 
-> **Cập nhật:** 2026-05-01 | **Phiên bản API:** v3.0.0
+> **Cập nhật:** 2026-05-09 | **Phiên bản API:** v3.0.0
 
 TrendSense là hệ thống phân tích xu hướng và dự báo khả năng bùng nổ (viral probability) cho video TikTok. Hệ thống vận hành theo kiến trúc **Hybrid Cloud** — kết hợp FastAPI Backend, **Redis Queue (RQ)** xử lý bất đồng bộ, Gemini API/OpenRouter làm LLM chính, Modal Serverless GPU làm xử lý đa phương thức, và Next.js Frontend với Supabase Realtime.
 
@@ -74,7 +74,7 @@ Dữ liệu đầu vào đến từ 2 nguồn chính:
   1. Chọn ngẫu nhiên 1 hashtag từ pool Việt Nam: `#xuhuong`, `#giaitri`, `#vietnam`, `#tintuc`...
   2. `link_crawler.py` — Thu thập pool link dự phòng (gấp 3x `MAX_VIDEOS = 30`), bỏ qua video đã scrape (`is_scraped()`).
   3. Nếu phát hiện bị chặn (`is_blocked()` kiểm tra captcha/access denied/robot) → tự động đổi Proxy khác.
-  4. `content_parser.py` — Bóc tách stats từ HTML: ưu tiên parse JSON embedded (`__UNIVERSAL_DATA_FOR_REHYDRATION__` hoặc `SIGI_STATE`), fallback regex. Trích xuất: Views, Likes, Comments, Shares, Saves, Create_Time, Caption, Top 5 Comments (kèm like count).
+  4. `content_parser.py` — Bóc tách stats từ HTML: ưu tiên parse JSON embedded (`__UNIVERSAL_DATA_FOR_REHYDRATION__` hoặc `SIGI_STATE`), fallback regex. Trích xuất: Views, Likes, Comments, Shares, Saves, Create_Time, Caption.
   5. **Bộ lọc dữ liệu rác:** Bỏ video có `views <= 0`, hoặc `likes > views`, hoặc `comments > views`.
   6. **Bộ lọc ngôn ngữ:** `langdetect` — chỉ giữ video tiếng Việt (`lang == 'vi'`).
 - **Lưu DB:** `insert_video_metadata()` → bảng `videos` với `ai_status = 'pending'`, đồng thời `mark_as_scraped()` vào bảng `history`.
@@ -158,7 +158,7 @@ Hai luồng xử lý song song, ưu tiên theo thứ tự:
 - **Mục đích:** Pipeline CPU-based chạy trên máy local hoặc CI, sử dụng Ollama thay vì Groq/Modal.
 - **Luồng xử lý:**
   1. `calculate_metrics()` — Tính VPH, engagement rate, viral velocity.
-  2. `sentiment_engine.analyze_batch()` — BERT multilingual (`nlptown/bert-base-multilingual-uncased-sentiment`) trên top-5 comments → positive_score + sentiment label.
+  2. `sentiment_engine.analyze_batch()` — BERT multilingual (`nlptown/bert-base-multilingual-uncased-sentiment`) trên caption và nội dung video → positive_score + sentiment label.
   3. `categorizer.categorize_video()` — Rule-based keyword matching (12 categories) → fallback zero-shot (`mDeBERTa-v3-base-mnli-xnli`).
   4. `nlp_utils.clean_text()` + `extract_smart_keywords()` — Keyword extraction bằng `underthesea` (Vietnamese NLP).
   5. `video_downloader.download_video()` — yt-dlp download.
@@ -220,7 +220,7 @@ viral_velocity = (views_per_hour × engagement_rate) / log10(age_hours + 10)
 
 ### Sentiment Analysis (`services/ai_engine/sentiment_engine.py`):
 - **Model:** `nlptown/bert-base-multilingual-uncased-sentiment` (multilingual BERT, CPU)
-- **Input:** Top 5 comments → batch inference (batch_size=32)
+- **Input:** Caption và nội dung video (hoặc top comments nếu có) → batch inference (batch_size=32)
 - **Output:** Star rating (1-5) → `positive_score` (0-100) + sentiment label (positive/neutral/negative)
 
 ### Phân loại danh mục (`services/ai_engine/categorizer.py`):
@@ -254,7 +254,6 @@ viral_velocity = (views_per_hour × engagement_rate) / log10(age_hours + 10)
 |----------|---------|
 | **Metadata cơ bản** | `video_id (PK)`, `link`, `caption`, `scrape_date`, `create_time` |
 | **Engagement stats** | `views`, `likes`, `comments`, `shares`, `saves` |
-| **Top comments** | `top1_cmt..top5_cmt`, `top1_likes..top5_likes` |
 | **Metrics tính toán** | `views_per_hour`, `engagement_rate`, `viral_velocity`, `viral_probability` |
 | **AI Analysis** | `video_description`, `category (TEXT[])`, `video_sentiment`, `positive_score`, `top_keywords`, `audio_transcript`, `embedding (vector 768)` |
 | **Upload Analysis** | `video_duration`, `video_orientation`, `scene_cut_count`, `trend_alignment_score`, `trend_insights (JSONB)` |
@@ -272,7 +271,7 @@ viral_velocity = (views_per_hour × engagement_rate) / log10(age_hours + 10)
 | Hàm | Mục đích |
 |-----|---------|
 | `init_db()` | Tạo bảng `history`, `videos` nếu chưa tồn tại. ALTER TABLE thêm trend-alignment columns. |
-| `insert_video_metadata()` | INSERT/Upsert metadata từ scraper + top 5 comments |
+| `insert_video_metadata()` | INSERT/Upsert metadata từ scraper |
 | `update_ai_results()` | Cập nhật kết quả AI cho scraper video (category, description, keywords, sentiment, metrics) |
 | `update_upload_analysis()` | Cập nhật Trend Alignment Score cho upload video |
 | `insert_user_video()` | Insert video upload với `ai_status='user_pending'` |
@@ -505,7 +504,7 @@ TrendSense/
 │       ├── scraper_main.py        # Main scraper entry point
 │       ├── browser.py             # Undetected Chromedriver + proxy rotation
 │       ├── link_crawler.py        # Video URL collection (3x buffer)
-│       ├── content_parser.py      # Stats + comments extraction (JSON + regex fallback)
+│       ├── content_parser.py      # Stats extraction (JSON + regex fallback)
 │       ├── captcha.py             # TikTok rotate CAPTCHA solver (external API)
 │       ├── video_downloader.py    # yt-dlp video download
 │       ├── utils.py               # parse_like_count (K/M suffixes)
@@ -556,7 +555,7 @@ TrendSense/
 ```text
 GitHub Actions (mỗi 4h)
   → scraper_main.py (Undetected Chromedriver + Proxy Rotation + CAPTCHA solver)
-  → content_parser.py (parse HTML → stats + top 5 comments)
+  → content_parser.py (parse HTML → stats)
   → langdetect filter (Vietnamese only)
   → insert_video_metadata() → Supabase (ai_status=pending)
   → _trigger_ai_pipeline():
@@ -620,4 +619,3 @@ GitHub Actions (Chủ Nhật 01:00 ICT)
   → reset_viral_predictions.py
   → UPDATE videos SET viral_probability = 0 WHERE scrape_date < now - 14 days
   → Cho phép re-predict với model mới train
-```
