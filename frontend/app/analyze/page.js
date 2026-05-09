@@ -372,6 +372,7 @@ export default function AnalyzePage() {
                         const items = [
                           { key: "category", icon: "🏷️", label: "Danh mục" },
                           { key: "content", icon: "📝", label: "Nội dung" },
+                          { key: "ai_prediction", icon: "🤖", label: "Dự báo AI" },
                           { key: "audio", icon: "🎵", label: "Âm thanh" },
                           { key: "duration", icon: "⏱️", label: "Thời lượng" },
                           { key: "format", icon: "📐", label: "Định dạng" },

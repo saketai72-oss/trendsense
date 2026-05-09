@@ -1,9 +1,9 @@
-name: 🧠 Weekly Model Retrain (Chủ Nhật Nửa Đêm)
+name: 🧠 Daily Model Retrain (00:00 ICT)
 
-# Chạy nửa đêm Chủ Nhật: Huấn luyện lại model dựa trên dữ liệu đã được AI xử lý
+# Chạy hàng ngày lúc nửa đêm: Huấn luyện lại Dual Model để bám sát xu hướng mới nhất
 on:
   schedule:
-    - cron: '0 17 * * 0'  # 17:00 UTC = 00:00 ICT
+    - cron: '0 17 * * *'  # 17:00 UTC = 00:00 ICT hàng ngày
   workflow_dispatch:
 
 permissions:
@@ -33,20 +33,15 @@ jobs:
           pip install -r services/tiktok_scraper/requirements.txt
           pip install -r services/ai_engine/requirements.txt --only-binary scikit-learn
 
-      - name: 🕷️ BƯỚC 1 — Cào stats mới nhất
-        env:
-          PYTHONPATH: .
-        run: python -m services.tiktok_scraper.scraper_main
-
-      - name: 🎓 BƯỚC 2 — Train model (Dựa trên data đã được Local AI phân tích)
+      - name: 🎓 BƯỚC 1 — Train Dual Models (Engagement & Alignment)
         env:
           PYTHONPATH: .
         run: python -m services.ai_engine.train_model
 
-      - name: 💾 BƯỚC 3 — Push model lên repository
+      - name: 💾 BƯỚC 2 — Push models lên repository
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f data/models/rf_model.joblib data/models/metrics.json
-          git commit -m "🧠 Weekly model update [skip ci]" || echo "No changes"
-          git push origin main
+          git add -f data/models/*.joblib data/models/*.json
+          git commit -m "🧠 Daily dual-model update [skip ci]" || echo "No changes"
+          git push

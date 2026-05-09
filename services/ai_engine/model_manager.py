@@ -12,47 +12,44 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 from core.config import service_settings as settings
 
 
-def save_model(model, metrics_dict):
-    """Lưu model đã train và metadata kèm theo"""
+def save_model(model, metrics_dict, name="rf_model"):
+    """Lưu model và metadata kèm theo"""
     os.makedirs(settings.MODEL_DIR, exist_ok=True)
+    path = os.path.join(settings.MODEL_DIR, f"{name}.joblib")
+    metrics_path = os.path.join(settings.MODEL_DIR, f"{name}_metrics.json")
 
     # Lưu model
-    joblib.dump(model, settings.MODEL_PATH)
+    joblib.dump(model, path)
 
     # Lưu metadata
     meta = {
         **metrics_dict,
         "trained_at": datetime.now().isoformat(),
-        "model_file": os.path.basename(settings.MODEL_PATH),
+        "model_file": os.path.basename(path),
     }
-    with open(settings.METRICS_PATH, 'w', encoding='utf-8') as f:
+    with open(metrics_path, 'w', encoding='utf-8') as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
 
-    print(f"[✓] Model đã lưu tại: {settings.MODEL_PATH}")
-    print(f"[✓] Metadata đã lưu tại: {settings.METRICS_PATH}")
+    print(f"[✓] Model đã lưu tại: {path}")
 
 
-def load_model():
-    """Load model đã train sẵn. Trả về None nếu chưa có."""
-    if not os.path.exists(settings.MODEL_PATH):
-        print("[!] ⚠️ Chưa có model file. Cần chạy train_model.py trước!")
+def load_model(name="rf_model"):
+    """Load model theo tên. Trả về None nếu chưa có."""
+    path = os.path.join(settings.MODEL_DIR, f"{name}.joblib")
+    if not os.path.exists(path):
         return None
 
-    model = joblib.load(settings.MODEL_PATH)
-    info = get_model_info()
-    if info:
-        print(f"[✓] Đã load model (trained: {info.get('trained_at', 'N/A')}, "
-              f"accuracy: {info.get('accuracy', 'N/A')}, "
-              f"samples: {info.get('training_samples', 'N/A')})")
+    model = joblib.load(path)
     return model
 
 
-def get_model_info():
-    """Đọc metadata của model hiện tại. None nếu chưa có."""
-    if not os.path.exists(settings.METRICS_PATH):
+def get_model_info(name="rf_model"):
+    """Đọc metadata của model theo tên."""
+    path = os.path.join(settings.MODEL_DIR, f"{name}_metrics.json")
+    if not os.path.exists(path):
         return None
     try:
-        with open(settings.METRICS_PATH, 'r', encoding='utf-8') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except:
         return None

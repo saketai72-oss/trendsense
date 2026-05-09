@@ -134,6 +134,24 @@ def _get_ocr():
     return _ocr_reader
 
 
+_alignment_model = None
+
+
+def _get_alignment_model():
+    """Load pre-trained Alignment Model (Content-based RF)."""
+    global _alignment_model
+    if _alignment_model is None:
+        import joblib
+        path = f"{MODEL_DIR}/alignment_model.joblib"
+        if os.path.exists(path):
+            print("[*] Loading Alignment Model (RF)...")
+            _alignment_model = joblib.load(path)
+            print("[✓] Alignment Model ready.")
+        else:
+            print("[!] Alignment Model not found at path.")
+    return _alignment_model
+
+
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -950,6 +968,46 @@ def _score_trend_alignment(groq_result, metadata, audio_transcript, benchmarks):
 
     scores["format"] = {"raw": fmt_raw, "label": f"{orient_label} · {cut_label}"}
 
+    # ═══ 6. AI PREDICTION SCORE (Model B) ═══
+    model_b = _get_alignment_model()
+    ai_pred_raw = 0.5 # Default neutral
+    if model_b:
+        try:
+            # Reconstruct features for Model B
+            trend_score = 0
+            video_kws = set(k.lower().strip() for k in groq_result.get("keywords", []) if k.strip())
+            trending_kws = set(k["keyword"].lower() for k in benchmarks.get("trending_keywords", []))
+            overlap = len(video_kws & trending_kws)
+            trend_score += overlap
+            
+            trending_cats = [c["category"] for c in benchmarks.get("trending_categories", [])]
+            if video_category in trending_cats[:5]:
+                trend_score += 5
+            
+            duration = metadata.get("duration", 0)
+            cuts_per_sec = metadata.get("scene_cut_count", 0) / max(duration, 1)
+            is_portrait = 1 if metadata.get("orientation") == "portrait" else 0
+            pos_score = groq_result.get("positive_score", 50)
+            
+            import pandas as pd
+            X = pd.DataFrame([[trend_score, duration, cuts_per_sec, is_portrait, pos_score]], 
+                             columns=['Trend_Score', 'Duration', 'Cuts_Per_Sec', 'Is_Portrait', 'Positive_Score'])
+            
+            prob = model_b.predict_proba(X)[0][1]
+            ai_pred_raw = float(prob)
+        except Exception as e:
+            print(f"    [!] AI Prediction Error: {e}")
+
+    scores["ai_prediction"] = {
+        "raw": ai_pred_raw, 
+        "label": f"Dự báo Viral: {ai_pred_raw*100:.1f}% (AI Model)"
+    }
+    # Update weight for AI prediction
+    weights["ai_prediction"] = 20
+    # To keep total 100, we'll reduce category and content slightly
+    weights["category"] -= 10
+    weights["content"] -= 10
+
     # ═══ TÍNH TỔNG ═══
     total = 0
     breakdown = {}
@@ -976,33 +1034,38 @@ def _score_trend_alignment(groq_result, metadata, audio_transcript, benchmarks):
 # GROQ TREND INSIGHT GENERATOR
 # ============================================================
 
-def _generate_trend_insights(score_result, groq_summary, metadata):
+def _generate_trend_insights(score_result, groq_result, metadata):
     """
     Groq sinh nhận xét tự nhiên + đề xuất hành động từ scores đã tính bằng Python.
-    Groq KHÔNG tự tính điểm — chỉ viết nhận xét dựa trên scores có sẵn.
+    Đặc biệt nhấn mạnh vào đánh giá Caption và Nội dung.
     """
     import json
     from groq import Groq
 
     breakdown_str = json.dumps(score_result.get("breakdown", {}), ensure_ascii=False, indent=2)
     total_score = score_result.get("trend_alignment_score", 0)
+    
+    # Lấy đánh giá sơ bộ từ bước phân tích trước
+    cap_eval = groq_result.get("caption_evaluation", "Chưa có đánh giá.")
+    cont_eval = groq_result.get("content_trend_match", "Chưa có đánh giá.")
 
     prompt = f"""Bạn là chuyên gia tư vấn nội dung TikTok Việt Nam hàng đầu.
 
-ĐIỂM PHÂN TÍCH VIDEO (đã tính sẵn bằng hệ thống, KHÔNG ĐƯỢC thay đổi):
-- Tổng điểm bám trend: {total_score}/100
-- Chi tiết các trục:
-{breakdown_str}
-- Tóm tắt video: {groq_summary}
-- Thời lượng: {metadata.get('duration', 0)}s | Định dạng: {metadata.get('orientation', 'unknown')} | Cắt cảnh: {metadata.get('scene_cut_count', 0)}
+DỰ LIỆU PHÂN TÍCH:
+- Tổng điểm: {total_score}/100
+- Chi tiết: {breakdown_str}
+- Caption Evaluation: {cap_eval}
+- Content Trend Match: {cont_eval}
+- Tóm tắt video: {groq_result.get('summary', '')}
+- Meta: {metadata.get('duration', 0)}s, {metadata.get('orientation', 'unknown')}, {metadata.get('scene_cut_count', 0)} cuts
 
-NHIỆM VỤ: Dựa CHÍNH XÁC vào các điểm số trên, viết nhận xét ngắn gọn bằng tiếng Việt.
-- Nêu 1 điểm mạnh nổi bật nhất
-- Nêu 1-2 đề xuất cải thiện CỤ THỂ, THỰC TẾ (vd: "cắt ngắn xuống 15s", "đổi sang khung dọc")
-- Viết nhận xét tổng quan 2-3 câu
+NHIỆM VỤ:
+1. Viết nhận xét tổng quan 2-3 câu, nhấn mạnh vào việc Caption và Nội dung đã bám trend hay chưa.
+2. Nêu 1 điểm mạnh nổi bật.
+3. Nêu 1 đề xuất cải thiện "ĐẮT GIÁ" nhất (ưu tiên sửa caption hoặc cách trình bày nội dung nếu điểm thấp).
 
-TRẢ VỀ ĐÚNG JSON:
-{{"overall_comment": "Nhận xét tổng quan 2-3 câu", "top_strength": "Điểm mạnh nổi bật nhất", "top_improvement": "Đề xuất cải thiện quan trọng nhất"}}"""
+TRẢ VỀ JSON:
+{{"overall_comment": "...", "top_strength": "...", "top_improvement": "..."}}"""
 
     try:
         client = Groq(api_key=os.environ["GROQ_API_KEY"])
@@ -1010,8 +1073,8 @@ TRẢ VỀ ĐÚNG JSON:
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            temperature=0.4,
-            max_tokens=300,
+            temperature=0.5,
+            max_tokens=400,
         )
         data = json.loads(response.choices[0].message.content or "{}")
         if "overall_comment" in data:
@@ -1021,9 +1084,9 @@ TRẢ VỀ ĐÚNG JSON:
 
     # Fallback: template-based insights
     return {
-        "overall_comment": f"Video đạt {total_score}/100 điểm bám trend. Hãy xem chi tiết từng trục để tối ưu.",
-        "top_strength": "Xem breakdown chi tiết ở trên.",
-        "top_improvement": "Hãy tập trung vào trục có điểm thấp nhất để cải thiện.",
+        "overall_comment": f"Video đạt {total_score}/100 điểm bám trend. {cap_eval} {cont_eval}",
+        "top_strength": "Dữ liệu phân tích chi tiết ở trên.",
+        "top_improvement": "Hãy tập trung tối ưu các trục có điểm thấp nhất để cải thiện khả năng viral.",
     }
 
 

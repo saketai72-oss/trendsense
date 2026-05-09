@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from redis import Redis
-from rq import Worker, Queue
+from rq import Worker, Queue, SimpleWorker
 from rq.timeouts import JobTimeoutException
 
 logging.basicConfig(
@@ -57,7 +57,12 @@ def main():
         sys.exit(1)
 
     queues = [Queue(QUEUE_NAME, connection=conn, default_timeout=JOB_TIMEOUT)]
-    worker = Worker(queues, connection=conn)
+    import platform
+    if platform.system() == "Windows":
+        logger.info("[Worker] 💻 Chế độ Windows: Sử dụng SimpleWorker (không fork)")
+        worker = SimpleWorker(queues, connection=conn)
+    else:
+        worker = Worker(queues, connection=conn)
 
     logger.info(f"[Worker] 🚀 Bắt đầu lắng nghe queue '{QUEUE_NAME}'...")
     worker.work(with_scheduler=True)
