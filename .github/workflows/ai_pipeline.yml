@@ -2,8 +2,8 @@ name: 🕷️ TrendSense Scrape + AI Pipeline (Mỗi 4 giờ)
 
 # Lên lịch chạy: Mỗi 4 tiếng cào dữ liệu → gửi nhỏ giọt sang Modal GPU xử lý AI
 on:
-  schedule:
-    - cron: '0 */4 * * *'
+#   schedule:
+#     - cron: '0 */4 * * *'
   workflow_dispatch:
 
 permissions:
