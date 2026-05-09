@@ -93,11 +93,11 @@ def chat_completion(
                     max_tokens=max_tokens,
                 )
                 if response_format == "json_object":
-                    kwargs["response_format"] = {"type": "json_object"}
+                    kwargs["response_format"] = {"type": "json_object"}  # type: ignore
 
                 try:
-                    resp = client.chat.completions.create(**kwargs)
-                    content = resp.choices[0].message.content
+                    resp = client.chat.completions.create(**kwargs)  # type: ignore
+                    content = resp.choices[0].message.content or ""
                     logger.info(f"[LLM] OpenRouter ✅ thành công với {selected_model}")
                     openrouter_success = True
                     break
@@ -130,10 +130,10 @@ def chat_completion(
                 max_tokens=max_tokens,
             )
             if response_format == "json_object":
-                kwargs["response_format"] = {"type": "json_object"}
+                kwargs["response_format"] = {"type": "json_object"}  # type: ignore
 
-            resp = groq_client.chat.completions.create(**kwargs)
-            content = resp.choices[0].message.content
+            resp = groq_client.chat.completions.create(**kwargs)  # type: ignore
+            content = resp.choices[0].message.content or ""
             logger.info("[LLM] Groq ✅ thành công")
             return content
 

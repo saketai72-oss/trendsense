@@ -1,7 +1,7 @@
 from transformers import pipeline
 
 print("[*] Đang tải mô hình NLP (bert-base-multilingual)...")
-nlp_model = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment", device=-1)
+nlp_model = pipeline("text-classification", model="nlptown/bert-base-multilingual-uncased-sentiment", device=-1)
 
 def analyze_batch(comments_list):
     if not comments_list: return []

@@ -74,7 +74,8 @@ def extract_audio_and_transcribe(video_path):
         os.close(fd)
         
         # Chỉ lấy tối đa 30s để dịch tiết kiệm CPU
-        duration = min(clip.duration, 30.0) 
+        clip_duration = clip.duration if clip.duration is not None else 30.0
+        duration = min(clip_duration, 30.0) 
         sub_clip = clip.subclipped(0, duration)
         
         import logging
@@ -141,7 +142,7 @@ def run_blip(pil_frames):
     
     for frame in pil_frames:
         try:
-            inputs = processor(frame, return_tensors="pt")
+            inputs = processor(frame, return_tensors="pt")  # type: ignore
             with torch.no_grad():
                 out = model.generate(**inputs, max_new_tokens=50)
             caption = processor.decode(out[0], skip_special_tokens=True).strip()

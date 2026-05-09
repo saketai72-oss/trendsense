@@ -35,7 +35,9 @@ def download_video(video_url, video_id):
         'socket_timeout': 60,
         'merge_output_format': 'mp4',
         'concurrent_fragment_downloads': 5,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
     }
 
     try:

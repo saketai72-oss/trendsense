@@ -180,7 +180,7 @@ def _download_video(url: str, video_id: str, is_direct_url: bool = False):
         ),
     }
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore
             ydl.download([url])
         files = glob.glob(f"/tmp/{video_id}.*")
         if files:
@@ -240,7 +240,8 @@ def _run_whisper(video_path):
         fd, mp3_path = tempfile.mkstemp(suffix=".mp3")
         os.close(fd)
 
-        duration = min(clip.duration, 30.0)
+        clip_duration = clip.duration if clip.duration is not None else 30.0
+        duration = min(clip_duration, 30.0)
         sub = clip.subclipped(0, duration)
         import logging
         logging.getLogger("moviepy").setLevel(logging.ERROR)
@@ -274,7 +275,7 @@ def _run_blip(pil_frames):
     captions = []
     for frame in pil_frames:
         try:
-            inputs = processor(frame, return_tensors="pt").to("cuda")
+            inputs = processor(frame, return_tensors="pt").to("cuda")  # type: ignore
             with torch.no_grad():
                 out = model.generate(**inputs, max_new_tokens=50)
             cap = processor.decode(out[0], skip_special_tokens=True).strip()
@@ -387,7 +388,7 @@ Lưu ý:
                             temperature=0.3,
                             max_tokens=300,
                         )
-                        raw = response.choices[0].message.content
+                        raw = response.choices[0].message.content or "{}"
                         data = json.loads(raw)
                         return _normalize_groq_result(data)
                     except Exception as e:
@@ -413,7 +414,7 @@ Lưu ý:
                     temperature=0.3,
                     max_tokens=300,
                 )
-                raw = response.choices[0].message.content
+                raw = response.choices[0].message.content or "{}"
                 data = json.loads(raw)
                 return _normalize_groq_result(data)
             except Exception as e:
@@ -534,8 +535,10 @@ def _generate_embedding(video_id, transcript, description):
                     model=model_name,
                     contents=combined,
                 )
-                embedding = response.embeddings[0].values
-                break
+                if response and response.embeddings and len(response.embeddings) > 0:
+                    embedding = response.embeddings[0].values
+                    if embedding:
+                        break
             except Exception as model_err:
                 if "404" in str(model_err) or "NOT_FOUND" in str(model_err):
                     print(f"    [~] Model {model_name} không khả dụng, thử model khác...")
@@ -638,14 +641,14 @@ def _extract_video_metadata(video_path):
     from moviepy import VideoFileClip
 
     result = {
-        "duration": 0, "orientation": "unknown",
+        "duration": 0.0, "orientation": "unknown",
         "scene_cut_count": 0, "width": 0, "height": 0, "fps": 0,
     }
 
     # 1. Duration từ MoviePy
     try:
         clip = VideoFileClip(video_path)
-        result["duration"] = round(clip.duration, 1)
+        result["duration"] = round(clip.duration or 0.0, 1)
         clip.close()
     except Exception:
         pass
@@ -657,7 +660,7 @@ def _extract_video_metadata(video_path):
 
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    fps = int(cap.get(cv2.CAP_PROP_FPS) or 30)
     result["width"], result["height"], result["fps"] = w, h, fps
 
     if h > w * 1.2:
@@ -1010,7 +1013,7 @@ TRẢ VỀ ĐÚNG JSON:
             temperature=0.4,
             max_tokens=300,
         )
-        data = json.loads(response.choices[0].message.content)
+        data = json.loads(response.choices[0].message.content or "{}")
         if "overall_comment" in data:
             return data
     except Exception as e:
@@ -1299,7 +1302,7 @@ def analyze(video_data: dict):
     print(f"📨 Received: {video_id} → Spawning GPU worker...")
 
     # Fire-and-forget: spawn xử lý nặng trên container GPU khác
-    process_video.spawn(video_data)
+    process_video.spawn(video_data)  # type: ignore
 
     return {
         "status": "queued",

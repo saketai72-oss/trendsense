@@ -22,7 +22,7 @@ _USER_AGENTS = [
 _SESSION_UA = random.choice(_USER_AGENTS)
 
 
-def fetch_ms_token_via_http(proxy: str = None) -> str:
+def fetch_ms_token_via_http(proxy: str | None = None) -> str:
     """
     Lấy ms_token bằng HTTP request đến TikTok.
     TikTok set cookie msToken khi visit trang bất kỳ.
@@ -46,17 +46,17 @@ def fetch_ms_token_via_http(proxy: str = None) -> str:
     for url in ["https://www.tiktok.com/", "https://www.tiktok.com/explore"]:
         try:
             resp = requests.get(url, headers=headers, proxies=proxies, timeout=15, allow_redirects=True)
-            for cookie in resp.cookies:
-                if cookie.name == "msToken" and cookie.value and len(cookie.value) > 20:
-                    print(f"  [✓] Auto ms_token: {cookie.value[:20]}... (từ {url})")
-                    return cookie.value
+            ms_token = resp.cookies.get("msToken")
+            if ms_token and len(ms_token) > 20:
+                print(f"  [✓] Auto ms_token: {ms_token[:20]}... (từ {url})")
+                return ms_token
         except requests.RequestException:
             continue
 
     return ""
 
 
-def get_ms_token(driver=None, proxy: str = None) -> str:
+def get_ms_token(driver=None, proxy: str | None = None) -> str:
     """
     Lấy ms_token theo thứ tự ưu tiên:
     1. Selenium browser cookies (nếu driver có sẵn)

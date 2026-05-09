@@ -66,9 +66,12 @@ def generate_embedding(text: str, max_retries: int = 3) -> Optional[List[float]]
                         model=model_name,
                         contents=text.strip(),
                     )
-                    embedding = response.embeddings[0].values
-                    logger.debug(f"[Embed] ✅ Sinh embedding với {model_name} (dim={len(embedding)})")
-                    return embedding
+                    if response and response.embeddings and response.embeddings[0].values:
+                        embedding = response.embeddings[0].values
+                        logger.debug(f"[Embed] ✅ Sinh embedding với {model_name} (dim={len(embedding)})")
+                        return embedding
+                    else:
+                        raise ValueError("API trả về response trống hoặc không có giá trị embedding")
                 except Exception as model_err:
                     err_str = str(model_err)
 
@@ -123,8 +126,8 @@ def update_video_embedding(video_id: str, transcript: str, description: str) -> 
     """
     # Ghép text: embedding bao quát cả nội dung nghe + nội dung nhìn
     combined = " ".join(filter(None, [
-        str(transcript or "").strip(),
-        str(description or "").strip(),
+        (transcript or "").strip(),
+        (description or "").strip(),
     ])).strip()
 
     if not combined:

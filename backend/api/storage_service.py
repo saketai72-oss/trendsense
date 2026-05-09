@@ -63,7 +63,7 @@ def create_upload_url(video_id: str, filename: str, expires_in: int = 600) -> Tu
         raise RuntimeError(f"Supabase không trả về upload URL: {response}")
 
     logger.info(f"[Storage] Tạo upload URL cho {video_id}: {storage_path}")
-    return upload_url, storage_path
+    return str(upload_url), storage_path
 
 
 def create_download_url(storage_path: str, expires_in: int = 3600) -> str:
@@ -94,7 +94,7 @@ def create_download_url(storage_path: str, expires_in: int = 3600) -> str:
         raise RuntimeError(f"Supabase không trả về download URL: {response}")
 
     logger.info(f"[Storage] Tạo download URL cho: {storage_path}")
-    return signed_url
+    return str(signed_url)
 
 
 def delete_file(storage_path: str) -> bool:

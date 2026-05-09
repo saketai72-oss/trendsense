@@ -323,6 +323,9 @@ def _download_matching_chromedriver(chrome_version: int) -> str | None:
             print(f"[*] Đã download ChromeDriver: {dest_path}")
 
         # Bước 4: Patch để bypass bot detection
+        if uc is None:
+            return dest_path # Trả về nhưng không patch được
+
         patcher = uc.Patcher(executable_path=dest_path)
         if not patcher.is_binary_patched(dest_path):
             patcher.executable_path = dest_path
@@ -347,6 +350,10 @@ def init_driver(proxy: str | None = None):
     Returns:
         uc.Chrome instance
     """
+    if uc is None:
+        print("[!] Lỗi: Thư viện undetected_chromedriver chưa được cài đặt.")
+        raise ImportError("Thiếu thư viện undetected_chromedriver. Hãy chạy 'pip install undetected-chromedriver'.")
+
     options = uc.ChromeOptions()
 
     # Cấu hình ẩn danh
@@ -423,7 +430,7 @@ def init_driver(proxy: str | None = None):
             import chromedriver_autoinstaller
             cd_path = chromedriver_autoinstaller.install()
             if cd_path:
-                driver_path = str(cd_path)
+                driver_path = cd_path
                 print(f"[*] chromedriver-autoinstaller: {driver_path}")
         except Exception as e:
             print(f"[!] chromedriver-autoinstaller failed: {e}")
@@ -441,20 +448,26 @@ def init_driver(proxy: str | None = None):
     # Fallback 3: dùng uc Patcher (có thể mismatch nhưng tốt hơn nothing)
     if not driver_path:
         print("[*] Fallback: dùng uc.Patcher để download ChromeDriver...")
-        patcher = uc.Patcher(version_main=v_main)
+        if v_main:
+            patcher = uc.Patcher(version_main=v_main)  # type: ignore
+        else:
+            patcher = uc.Patcher()
         patcher.auto()
         driver_path = patcher.executable_path
 
     print(f"[*] ChromeDriver: {driver_path}")
 
     # Để uc.Chrome tự xử lý patching — không can thiệp
-    driver = uc.Chrome(
-        options=options,
-        browser_executable_path=chrome_path,
-        driver_executable_path=driver_path,
-        use_subprocess=True,
-        version_main=v_main,
-    )
+    chrome_kwargs = {
+        "options": options,
+        "browser_executable_path": chrome_path,
+        "driver_executable_path": driver_path,
+        "use_subprocess": True,
+    }
+    if v_main:
+        chrome_kwargs["version_main"] = v_main  # type: ignore
+
+    driver = uc.Chrome(**chrome_kwargs)
 
     driver.set_page_load_timeout(60)
     driver.implicitly_wait(10)

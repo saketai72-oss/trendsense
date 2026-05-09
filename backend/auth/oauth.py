@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # ── Google OAuth ─────────────────────────────────────────────────────────────
 
-def get_google_auth_url(state: str = None) -> str:
+def get_google_auth_url(state: str | None = None) -> str:
     """
     Generate Google OAuth authorization URL.
     User will be redirected to Google to grant permission.
@@ -83,7 +83,7 @@ def exchange_google_code(code: str) -> dict:
 
 # ── GitHub OAuth ─────────────────────────────────────────────────────────────
 
-def get_github_auth_url(state: str = None) -> str:
+def get_github_auth_url(state: str | None = None) -> str:
     """
     Generate GitHub OAuth authorization URL.
     """

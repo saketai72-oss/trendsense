@@ -70,6 +70,10 @@ def process_video_with_gemini(video_data: dict):
     5. Xoá file dọn dẹp ổ cứng.
     """
     video_id = video_data.get("video_id")
+    if not video_id:
+        logger.error("❌ Nhận được video_data không có video_id. Bỏ qua.")
+        return
+
     url = video_data.get("url", "")
     caption = video_data.get("caption", "")
 
@@ -106,22 +110,21 @@ def process_video_with_gemini(video_data: dict):
     try:
         # BƯỚC 2: Upload lên Gemini
         logger.info(f"📤 Uploading lên Gemini File API: {local_path}")
-        try:
-            gemini_file = client.files.upload(file=local_path)
-        except Exception as upload_err:
-            raise RuntimeError(f"Lỗi hệ thống Gemini khi upload: {upload_err}")
+        gemini_file = client.files.upload(file=local_path)
+        if not gemini_file or not gemini_file.name:
+            raise RuntimeError("Upload video thất bại hoặc không nhận được tên file từ Gemini.")
             
         # BƯỚC 3: Xoá ngay file local để giải phóng ổ cứng
         _delete_local_file(local_path)
 
         # BƯỚC 4: Polling chờ trạng thái ACTIVE
         logger.info(f"⏳ Đang chờ Gemini xử lý video...")
+        file_name = gemini_file.name
         timeout_seconds = 180
         start_wait = time.time()
         
-        # Ở SDK mới, state có thể là chuỗi hoặc Enum, ta kiểm tra cả hai
         while True:
-            gemini_file = client.files.get(name=gemini_file.name)
+            gemini_file = client.files.get(name=file_name)
             state = str(gemini_file.state).upper()
             
             if "ACTIVE" in state:
@@ -154,16 +157,19 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
         # BƯỚC 5: Gọi Inference
         selected_model = "gemini-2.5-flash"
         logger.info(f"🤖 Đang sử dụng model: {selected_model}")
+        if not gemini_file:
+            raise RuntimeError("Không thể truy cập file trên Gemini.")
+
         response = client.models.generate_content(
             model=selected_model,
-            contents=[gemini_file, prompt],
+            contents=[gemini_file, prompt],  # type: ignore
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 temperature=0.3,
             )
         )
 
-        raw_json = response.text
+        raw_json = response.text or "{}"
         logger.info(f"🎯 Gemini Output: {raw_json[:150]}...")
         result = json.loads(raw_json)
 
@@ -188,31 +194,26 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
         # BƯỚC 7: Cập nhật DB
         # Upload videos (video_id starts with "upload_") → video_analyses table
         # Scraped videos → videos table
+        # BƯỚC 7: Cập nhật DB
+        final_data = {
+            "video_description": result.get("summary", result.get("video_description", "")),
+            "category": matched if not video_id.startswith("upload_") else ([matched] if isinstance(matched, str) else matched),
+            "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
+            "positive_score": result.get("positive_score", 50.0),
+            "top_keywords": ", ".join(result.get("keywords", [])[:5]) if "keywords" in result else result.get("top_keywords", ""),
+            "audio_transcript": result.get("audio_transcript", ""),
+            "ai_status": "completed",
+        }
+
         if video_id.startswith("upload_"):
-            upload_data = {
-                "video_description": result.get("summary", ""),
-                "category": [matched] if isinstance(matched, str) else matched,
-                "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
-                "positive_score": result.get("positive_score", 50.0),
-                "top_keywords": ", ".join(result.get("keywords", [])[:5]),
-                "audio_transcript": result.get("audio_transcript", ""),
-                "ai_status": "completed",
-            }
-            update_upload_analysis(video_id, upload_data)
+            update_upload_analysis(video_id, final_data)
             logger.info(f"✅ Hoàn thành Gemini → video_analyses cho upload {video_id}")
         else:
-            final_data = {
-                "video_description": result.get("summary", ""),
-                "category": matched,
-                "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
-                "positive_score": result.get("positive_score", 50.0),
-                "top_keywords": ", ".join(result.get("keywords", [])[:5]),
-                "audio_transcript": result.get("audio_transcript", ""),
+            final_data.update({
                 "views_per_hour": vph,
                 "engagement_rate": er,
                 "viral_velocity": velocity,
-                "ai_status": "completed",
-            }
+            })
             update_ai_results(video_id, final_data)
             logger.info(f"✅ Hoàn thành Gemini → videos cho scraped {video_id}")
 
@@ -221,8 +222,8 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
             from backend.api.embedding_service import update_video_embedding
             update_video_embedding(
                 video_id,
-                transcript=final_data.get("audio_transcript", ""),
-                description=final_data.get("video_description", ""),
+                transcript=str(final_data.get("audio_transcript", "")),
+                description=str(final_data.get("video_description", "")),
             )
         except Exception as emb_err:
             logger.warning(f"[Embed] Bỏ qua embedding: {emb_err}")

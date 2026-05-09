@@ -41,7 +41,7 @@ def _ensure_playwright_browsers() -> bool:
             return False
 
 
-def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str = None) -> list[str]:
+def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str | None = None) -> list[str]:
     """
     Dùng TikTokApi để lấy video từ hashtag.
     Cần ms_token (tự động lấy từ Selenium → HTTP fetch → env var).
@@ -128,7 +128,7 @@ def fetch_via_tiktokapi(tag: str, max_videos: int = 90, driver=None, proxy: str 
             loop.close()
 
 
-def fetch_hashtag_videos(tag: str, max_videos: int = 90, driver=None, proxy: str = None) -> tuple[list[str], dict]:
+def fetch_hashtag_videos(tag: str, max_videos: int = 90, driver=None, proxy: str | None = None) -> tuple[list[str], dict]:
     """
     Thu thập video URLs + stats từ TikTok hashtag bằng TikTokApi.
 

@@ -175,58 +175,63 @@ def main():
 
         print(f"\n[{i}/{len(links)}] Đang cào: {link}  (Đã lưu: {saved_count}/{target})")
 
-        # Nếu TikTokApi đã có stats → dùng trực tiếp, không cần Selenium
         clean_link = link.split('?')[0]
-        if clean_link in api_stats:
-            api_data = api_stats[clean_link]
-            stats = {
-                'Caption': api_data.get('caption', ''),
-                'Views': api_data.get('views', 0),
-                'Likes': api_data.get('likes', 0),
-                'Comments': api_data.get('comments', 0),
-                'Shares': api_data.get('shares', 0),
-                'Saves': api_data.get('saves', 0),
-                'Create_Time': str(api_data.get('create_time', 0)),
-            }
-            print(f"  [📊] Stats (từ TikTokApi): 👁️{stats['Views']:,} | ❤️{stats['Likes']:,} | 💬{stats['Comments']:,}")
-        else:
-            # Fallback: Selenium scrape
-            page_loaded = False
-            for attempt in range(1, 4):
-                try:
-                    driver.get(link)
-                    time.sleep(2.5 + random.uniform(0, 1.5))
+        
+        # 1. Chạy bằng Selenium trước (để lấy cả comment và stats)
+        page_loaded = False
+        for attempt in range(1, 4):
+            try:
+                driver.get(link)
+                time.sleep(2.5 + random.uniform(0, 1.5))
 
-                    if is_blocked(driver):
-                        if attempt < 3:
-                            print(f"  [⟳] Bị block khi tải video (attempt {attempt}/3). Chờ {5 * attempt}s...")
-                            time.sleep(5 * attempt)
-                            continue
-                        print(f"  [🚫] Bị block! Dừng cào — cần xoay vòng proxy.")
-                        break
-                    page_loaded = True
-                    break
-                except Exception as e:
-                    if attempt < 3:
-                        print(f"  [⟳] Lỗi tải video (attempt {attempt}/3): {str(e)[:80]}")
-                        time.sleep(3 * attempt)
-                        continue
-                    print(f"  [!] Bỏ qua video sau 3 lần thử: {str(e)[:80]}")
-
-            if not page_loaded:
                 if is_blocked(driver):
+                    if attempt < 3:
+                        print(f"  [⟳] Bị block khi tải video (attempt {attempt}/3). Chờ {5 * attempt}s...")
+                        time.sleep(5 * attempt)
+                        continue
+                    print(f"  [🚫] Bị block! Dừng cào bằng Selenium — sẽ thử fallback sang API.")
                     break
-                continue
+                page_loaded = True
+                break
+            except Exception as e:
+                if attempt < 3:
+                    print(f"  [⟳] Lỗi tải video (attempt {attempt}/3): {str(e)[:80]}")
+                    time.sleep(3 * attempt)
+                    continue
+                print(f"  [!] Lỗi Selenium tải video sau 3 lần thử: {str(e)[:80]}")
 
+        # 2. Xử lý logic fallback
+        stats = {}
+        if page_loaded:
             # Bóc tách stats từ Selenium
             stats = extract_basic_stats(driver.page_source)
+            print(f"  [📊] Stats (từ Selenium): 👁️{stats.get('Views', 0):,} | ❤️{stats.get('Likes', 0):,} | 💬{stats.get('Comments', 0):,}")
+        else:
+            # Fallback sang TikTokApi nếu Selenium lỗi/bị block
+            if clean_link in api_stats:
+                api_data = api_stats[clean_link]
+                stats = {
+                    'Caption': api_data.get('caption', ''),
+                    'Views': api_data.get('views', 0),
+                    'Likes': api_data.get('likes', 0),
+                    'Comments': api_data.get('comments', 0),
+                    'Shares': api_data.get('shares', 0),
+                    'Saves': api_data.get('saves', 0),
+                    'Create_Time': str(api_data.get('create_time', 0)),
+                }
+                print(f"  [📊] Stats (từ TikTokApi - Fallback): 👁️{stats['Views']:,} | ❤️{stats['Likes']:,} | 💬{stats['Comments']:,}")
+            else:
+                if is_blocked(driver):
+                    break # Dừng cào hoàn toàn nếu block và không có fallback
+                print("  [!] Không có dữ liệu TikTokApi fallback. Bỏ qua video này.")
+                continue
 
         # === KIỂM TRA DỮ LIỆU HỢP LỆ ===
-        views = stats.get('Views', 0)
-        likes = stats.get('Likes', 0)
-        comments_count = stats.get('Comments', 0)
-        shares = stats.get('Shares', 0)
-        saves = stats.get('Saves', 0)
+        views = int(stats.get('Views', 0))
+        likes = int(stats.get('Likes', 0))
+        comments_count = int(stats.get('Comments', 0))
+        shares = int(stats.get('Shares', 0))
+        saves = int(stats.get('Saves', 0))
 
         print(f"  [📊] Stats: 👁️{views:,} | ❤️{likes:,} | 💬{comments_count:,} | 🔗{shares:,} | 📌{saves:,}")
 
@@ -249,7 +254,7 @@ def main():
             continue
 
         # === BỘ LỌC NGÔN NGỮ (TRƯỚC KHI CÀO COMMENTS — TIẾT KIỆM THỜI GIAN) ===
-        caption_text = stats.get('Caption', '').strip()
+        caption_text = str(stats.get('Caption', '')).strip()
         if caption_text:
             try:
                 lang = detect(caption_text)
@@ -267,8 +272,12 @@ def main():
                 pass
 
         # Bóc tách Top 5 bình luận (CHỈ chạy cho video đã qua bộ lọc ngôn ngữ)
-        has_comments = stats['Comments'] > 0
-        top_5_comments = extract_top_comments(driver, has_comments)
+        top_5_comments = []
+        if page_loaded:
+            has_comments = comments_count > 0
+            top_5_comments = extract_top_comments(driver, has_comments)
+        else:
+            print("  [💬] Bỏ qua cào comment do chạy bằng Fallback TikTokApi.")
 
         # 3. Đóng gói dữ liệu và ghi vào Postgres
         video_id = extract_video_id(link)

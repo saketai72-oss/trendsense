@@ -449,6 +449,63 @@ def update_ai_results(video_id, res):
     finally:
         conn.close()
 
+
+def get_videos_for_vision_analysis():
+    """Lấy danh sách video cần phân tích bằng Multimodal AI (Thị giác máy tính)."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Ưu tiên video chưa có transcript hoặc status là vision_pending
+            cursor.execute("""
+                SELECT video_id, caption 
+                FROM videos 
+                WHERE (ai_status = 'pending' OR ai_status = 'vision_pending')
+                ORDER BY scrape_date DESC 
+                LIMIT 50
+            """)
+            rows = cursor.fetchall()
+            # Ở môi trường local, video được tải về thư mục 'downloads/'
+            import os
+            for r in rows:
+                # Type safe: video_id is str
+                r['video_path'] = os.path.abspath(f"downloads/{r['video_id']}.mp4")
+            return rows
+    finally:
+        conn.close()
+
+
+def update_vision_results(video_id: str, summary: str, category: str | None = None, 
+                         transcript: str | None = None, ocr: str | None = None, 
+                         blip: str | None = None):
+    """Cập nhật kết quả phân tích thị giác vào DB."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Nếu chỉ có summary là chuỗi lỗi (truyền 2 tham số)
+            if category is None:
+                cursor.execute("UPDATE videos SET ai_status = 'error', video_description = %s WHERE video_id = %s", (summary, video_id))
+            else:
+                import json
+                trend_insights = json.dumps({
+                    "ocr_text": ocr,
+                    "blip_caption": blip
+                }, ensure_ascii=False)
+                
+                cat_list = [c.strip() for c in category.split('|')] if category else []
+                
+                cursor.execute("""
+                    UPDATE videos SET
+                        video_description = %s,
+                        category = %s,
+                        audio_transcript = %s,
+                        trend_insights = %s,
+                        ai_status = 'completed'
+                    WHERE video_id = %s
+                """, (summary, cat_list, transcript, trend_insights, video_id))
+            conn.commit()
+    finally:
+        conn.close()
+
 def get_recent_videos(days=14):
     cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
     conn = get_connection()
@@ -473,10 +530,10 @@ def reset_all_analysis_status():
 # ==========================================
 
 def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
-                            categories: list = None, sentiment: str = None,
-                            search: str = None, sort_by: str = "viral_probability",
+                            categories: list | None = None, sentiment: str | None = None,
+                            search: str | None = None, sort_by: str = "viral_probability",
                             sort_order: str = "desc", min_viral: float = 0,
-                            semantic_video_ids: list = None):
+                            semantic_video_ids: list | None = None):
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -510,7 +567,8 @@ def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
             order = "DESC" if sort_order.lower() == "desc" else "ASC"
 
             cur.execute(f"SELECT COUNT(*) as total FROM videos WHERE {where_sql}", params)
-            total = cur.fetchone()["total"]
+            count_row = cur.fetchone()
+            total = count_row["total"] if count_row else 0
 
             offset = (page - 1) * per_page
             # Khi có semantic search, giữ nguyên thứ tự cosine similarity
@@ -591,7 +649,7 @@ def get_timeline_data():
     finally:
         conn.close()
 
-def insert_user_video(video_id: str, url: str, user_id: str = None):
+def insert_user_video(video_id: str, url: str, user_id: str | None = None):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -780,9 +838,9 @@ def update_upload_analysis(video_id, results):
 # AUTHENTICATION — USER CRUD
 # ==========================================
 
-def create_user(email: str, password_hash: str = None, display_name: str = None,
-                avatar_url: str = None, auth_provider: str = "local",
-                provider_id: str = None):
+def create_user(email: str, password_hash: str | None = None, display_name: str | None = None,
+                avatar_url: str | None = None, auth_provider: str = "local",
+                provider_id: str | None = None):
     """Create a new user. Returns the user dict or None on failure."""
     conn = get_connection()
     try:
@@ -804,8 +862,10 @@ def create_user(email: str, password_hash: str = None, display_name: str = None,
         conn.close()
 
 
-def get_user_by_id(user_id: str):
+def get_user_by_id(user_id: str | None):
     """Get user by UUID."""
+    if not user_id:
+        return None
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -816,8 +876,10 @@ def get_user_by_id(user_id: str):
         conn.close()
 
 
-def get_user_by_email(email: str):
+def get_user_by_email(email: str | None):
     """Get user by email address."""
+    if not email:
+        return None
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -843,8 +905,10 @@ def get_user_by_provider(provider: str, provider_id: str):
         conn.close()
 
 
-def update_user_login(user_id: str):
+def update_user_login(user_id: str | None):
     """Update the user's last activity timestamp."""
+    if not user_id:
+        return
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -859,8 +923,10 @@ def update_user_login(user_id: str):
         conn.close()
 
 
-def link_oauth_provider(user_id: str, provider: str, provider_id: str, avatar_url: str = None):
+def link_oauth_provider(user_id: str | None, provider: str, provider_id: str, avatar_url: str | None = None):
     """Link an OAuth provider to an existing user account."""
+    if not user_id:
+        return
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -998,7 +1064,8 @@ def get_user_videos(user_id: str, page: int = 1, per_page: int = 20):
                 "SELECT COUNT(*) as total FROM videos WHERE user_id = %s",
                 (user_id,)
             )
-            total = cur.fetchone()["total"]
+            count_row = cur.fetchone()
+            total = count_row["total"] if count_row else 0
 
             return [dict(r) for r in rows], total
     finally:

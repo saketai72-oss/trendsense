@@ -87,8 +87,9 @@ def extract_keywords(txt):
     Chỉ lọc stopword, không cần NER/POS-tag.
     """
     if not txt: return []
-    tokenized_txt = word_tokenize(txt, format="text")
-    return [w for w in tokenized_txt.split() if len(w) > 2 and w.lower() not in STOPWORDS]
+    # word_tokenize mặc định trả về list, không cần split()
+    words = word_tokenize(txt)
+    return [w for w in words if len(w) > 2 and w.lower() not in STOPWORDS]
 
 
 def extract_smart_keywords(txt):

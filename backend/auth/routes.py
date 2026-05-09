@@ -357,7 +357,7 @@ def github_callback(code: str = Query(...), state: Optional[str] = None):
 # ── Internal: OAuth login-or-create flow ─────────────────────────────────────
 
 def _oauth_login_or_create(
-    email: str, name: str, picture: str,
+    email: str, name: str | None, picture: str | None,
     provider: str, provider_id: str,
 ) -> RedirectResponse:
     """

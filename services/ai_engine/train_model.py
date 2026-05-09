@@ -76,7 +76,8 @@ def train():
     X = df[FEATURES]
     y = df['Is_Future_Trend']
 
-    metrics = {"training_samples": len(X), "window_days": settings.SLIDING_WINDOW_DAYS}
+    from typing import Any
+    metrics: dict[str, Any] = {"training_samples": len(X), "window_days": settings.SLIDING_WINDOW_DAYS}
 
     try:
         X_train, X_test, y_train, y_test = train_test_split(
