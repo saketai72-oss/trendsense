@@ -6,3 +6,4 @@ psycopg2-binary==2.9.11
 langdetect==1.0.9
 TikTokApi==7.3.3
 playwright==1.59.0
+python-dotenv==1.0.0
