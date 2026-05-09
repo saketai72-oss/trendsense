@@ -134,22 +134,22 @@ def _get_ocr():
     return _ocr_reader
 
 
-_alignment_model = None
+_trend_analyzer = None
 
 
-def _get_alignment_model():
-    """Load pre-trained Alignment Model (Content-based RF)."""
-    global _alignment_model
-    if _alignment_model is None:
+def _get_trend_analyzer():
+    """Load pre-trained Trend Analyzer (Advanced Gradient Boosting)."""
+    global _trend_analyzer
+    if _trend_analyzer is None:
         import joblib
-        path = f"{MODEL_DIR}/alignment_model.joblib"
+        path = f"{MODEL_DIR}/trend_analyzer.joblib"
         if os.path.exists(path):
-            print("[*] Loading Alignment Model (RF)...")
-            _alignment_model = joblib.load(path)
-            print("[✓] Alignment Model ready.")
+            print("[*] Loading Trend Analyzer (HGB)...")
+            _trend_analyzer = joblib.load(path)
+            print("[✓] Trend Analyzer ready.")
         else:
-            print("[!] Alignment Model not found at path.")
-    return _alignment_model
+            print("[!] Trend Analyzer not found at path.")
+    return _trend_analyzer
 
 
 # ============================================================
@@ -322,56 +322,61 @@ def _run_ocr(cv2_frames):
     return " | ".join(all_text)
 
 
-def _call_groq(audio_text, ocr_text, blip_text, caption, top_comments):
+def _call_groq(audio_text, ocr_text, blip_text, caption, trending_data=None, top_comments=None):
     """
-    Gọi Groq Llama-3 70B — MỘT lệnh duy nhất thay thế 3 model riêng lẻ:
-    Tóm tắt + Phân loại + Đánh giá cảm xúc + Trích xuất từ khóa.
-    Có retry với exponential backoff nếu Rate Limit 429.
+    Gọi Groq Llama-3 70B — Phân tích chuyên sâu.
     """
     import json
     import time
     from groq import Groq
 
-    # Cắt gọn độ dài dữ liệu để tránh lỗi 400 (Vượt quá độ dài Context Window của LLM)
+    # Cắt gọn dữ liệu
     audio_t = str(audio_text)[:3000] if audio_text else ""
     ocr_t = str(ocr_text)[:1500] if ocr_text else ""
     blip_t = str(blip_text)[:1500] if blip_text else ""
     cap_t = str(caption)[:500] if caption else ""
-
-    categories_str = ", ".join(STANDARD_CATEGORIES)
     
-    # Chỉ lấy tối đa 15 comments đầu tiên và cắt bớt ký tự nếu quá dài
-    safe_comments = []
-    for c in (top_comments or [])[:15]:
-        text = c.get('text', '')
-        if text:
-            safe_comments.append(f"  - {str(text)[:200]}")
-    comments_str = "\n".join(safe_comments) or "Không có bình luận."
+    # Xử lý comments nếu có
+    comments_str = ""
+    if top_comments:
+        safe_comments = [f"- {str(c.get('text', ''))[:200]}" for c in top_comments[:10]]
+        comments_str = "\n".join(safe_comments)
 
+    trending_kws = ", ".join([k["keyword"] for k in (trending_data or {}).get("trending_keywords", [])[:15]])
+    trending_cats = ", ".join([c["category"] for c in (trending_data or {}).get("trending_categories", [])[:5]])
+    
+    categories_str = ", ".join(STANDARD_CATEGORIES)
 
-    prompt = f"""Bạn là trợ lý AI phân tích video TikTok Việt Nam.
+    prompt = f"""Bạn là chuyên gia phân tích dữ liệu TikTok Việt Nam cao cấp.
+DỮ LIỆU ĐẦU VÀO:
+- Âm thanh: {audio_t}
+- Chữ trên màn hình: {ocr_t}
+- Hình ảnh: {blip_t}
+- Caption người dùng: {cap_t}
+- Một số bình luận mẫu: {comments_str if comments_str else "Chưa có bình luận."}
 
-DỮ LIỆU TRÍCH XUẤT TỪ VIDEO:
-1. Âm thanh (Transcript): {audio_t}
-2. Chữ trên màn hình (OCR): {ocr_t}
-3. Bối cảnh hình ảnh (Vision): {blip_t}
-4. Tiêu đề gốc: {cap_t}
-5. Top bình luận:
-{comments_str}
+XU HƯỚNG HIỆN TẠI (TRENDING):
+- Keywords: {trending_kws}
+- Chủ đề hot: {trending_cats}
 
 NHIỆM VỤ:
-1. Viết 1 câu tóm tắt nội dung video (~20 từ), ngắn gọn, khách quan, tiếng Việt.
-2. Chọn ĐÚNG 1 danh mục phù hợp nhất từ danh sách: [{categories_str}]
-3. Đánh giá cảm xúc cộng đồng dựa trên bình luận (nếu có).
-4. Trích xuất 3-5 từ khóa chính (tiếng Việt, ưu tiên danh từ/tên riêng).
+1. Viết 1 bản TÓM TẮT CHI TIẾT nội dung video (khoảng 60-80 từ). Mô tả kỹ bối cảnh, hành động và thông điệp.
+2. Chọn 1 danh mục từ: [{categories_str}]
+3. Đánh giá CAPTION: Có liên quan đến nội dung video không? Có chứa từ khóa trend nào phía trên không? Chỉ rõ từ khóa nào.
+4. Đánh giá TREND: Nội dung video có đang bám theo xu hướng nào hiện nay không? Chủ đề cụ thể là gì?
+5. Trích xuất 5 từ khóa chính.
+6. Đánh giá cảm xúc cộng đồng dự kiến (dựa trên nội dung hoặc bình luận mẫu).
 
-BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON SAU (không giải thích thêm):
-{{"summary": "câu tóm tắt tiếng Việt", "category": "emoji + tên danh mục", "sentiment": "🟢 TÍCH CỰC", "positive_score": 75, "keywords": ["từ khóa 1", "từ khóa 2"]}}
-
-Lưu ý:
-- sentiment chỉ được là 1 trong 3: "🟢 TÍCH CỰC", "🟡 TRUNG LẬP", "🔴 TIÊU CỰC"
-- positive_score là số nguyên từ 0 đến 100
-- category phải copy chính xác từ danh sách (bao gồm emoji)"""
+TRẢ VỀ JSON (BẮT BUỘC):
+{{
+  "summary": "...",
+  "category": "...",
+  "caption_evaluation": "Nhận xét về độ liên quan và keywords trend trùng khớp (nêu rõ từ nào)...",
+  "content_trend_match": "Nhận xét video có bám trend không, cụ thể là chủ đề/trend gì...",
+  "sentiment": "🟢 TÍCH CỰC",
+  "positive_score": 80,
+  "keywords": ["...", "..."]
+}}"""
 
     openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
     groq_key = os.environ.get("GROQ_API_KEY", "")
@@ -395,26 +400,20 @@ Lưu ý:
                 "meta-llama/llama-3-8b-instruct:free"
             ]
 
-            openrouter_success = False
             for selected_model in openrouter_free_models:
-                for attempt in range(2): # Thử tối đa 2 lần cho mỗi model
-                    try:
-                        response = client.chat.completions.create(
-                            model=selected_model,
-                            messages=[{"role": "user", "content": prompt}],
-                            response_format={"type": "json_object"},
-                            temperature=0.3,
-                            max_tokens=300,
-                        )
-                        raw = response.choices[0].message.content or "{}"
-                        data = json.loads(raw)
-                        return _normalize_groq_result(data)
-                    except Exception as e:
-                        if "429" in str(e) and attempt == 0:
-                            time.sleep(2)
-                            continue
-                        break # Bỏ qua model này nếu lỗi khác hoặc đã thử 2 lần
-                # Tiếp tục vòng lặp model bên ngoài nếu break
+                try:
+                    response = client.chat.completions.create(
+                        model=selected_model,
+                        messages=[{"role": "user", "content": prompt}],
+                        response_format={"type": "json_object"},
+                        temperature=0.3,
+                        max_tokens=500,
+                    )
+                    raw = response.choices[0].message.content or "{}"
+                    data = json.loads(raw)
+                    return _normalize_groq_result(data)
+                except Exception:
+                    continue
         except Exception:
             pass
 
@@ -489,6 +488,9 @@ def _normalize_groq_result(data: dict) -> dict:
     if not data.get("summary"):
         data["summary"] = "Lỗi khi gọi LLM AI tổng hợp."
         data["ai_status"] = "error"
+
+    data["caption_evaluation"] = data.get("caption_evaluation", "Chưa có đánh giá về caption.")
+    data["content_trend_match"] = data.get("content_trend_match", "Chưa có đánh giá về xu hướng.")
 
     return data
 
@@ -968,30 +970,38 @@ def _score_trend_alignment(groq_result, metadata, audio_transcript, benchmarks):
 
     scores["format"] = {"raw": fmt_raw, "label": f"{orient_label} · {cut_label}"}
 
-    # ═══ 6. AI PREDICTION SCORE (Model B) ═══
-    model_b = _get_alignment_model()
+    # ═══ 6. AI PREDICTION SCORE (Trend Analyzer) ═══
+    model_b = _get_trend_analyzer()
     ai_pred_raw = 0.5 # Default neutral
     if model_b:
         try:
-            # Reconstruct features for Model B
-            trend_score = 0
+            # Reconstruct features for Trend Analyzer
             video_kws = set(k.lower().strip() for k in groq_result.get("keywords", []) if k.strip())
-            trending_kws = set(k["keyword"].lower() for k in benchmarks.get("trending_keywords", []))
-            overlap = len(video_kws & trending_kws)
-            trend_score += overlap
+            trending_kws_data = benchmarks.get("trending_keywords", [])
+            trending_kws = [k["keyword"].lower() for k in trending_kws_data]
             
+            # KW_Match_Count
+            kw_match_count = sum(1 for tk in trending_kws[:30] if tk in video_kws)
+            
+            # Cat_Hotness
             trending_cats = [c["category"] for c in benchmarks.get("trending_categories", [])]
-            if video_category in trending_cats[:5]:
-                trend_score += 5
+            cat_hotness = 0
+            for i, c in enumerate(trending_cats[:10]):
+                if video_category == c:
+                    cat_hotness = 10 - i
+                    break
             
             duration = metadata.get("duration", 0)
             cuts_per_sec = metadata.get("scene_cut_count", 0) / max(duration, 1)
             is_portrait = 1 if metadata.get("orientation") == "portrait" else 0
+            is_ideal_duration = 1 if (15 <= duration <= 35) else 0
             pos_score = groq_result.get("positive_score", 50)
+            trend_sentiment_score = kw_match_count * (pos_score / 100.0)
             
             import pandas as pd
-            X = pd.DataFrame([[trend_score, duration, cuts_per_sec, is_portrait, pos_score]], 
-                             columns=['Trend_Score', 'Duration', 'Cuts_Per_Sec', 'Is_Portrait', 'Positive_Score'])
+            features = [kw_match_count, cat_hotness, duration, cuts_per_sec, is_portrait, is_ideal_duration, trend_sentiment_score]
+            cols = ['KW_Match_Count', 'Cat_Hotness', 'Duration', 'Cuts_Per_Sec', 'Is_Portrait', 'Is_Ideal_Duration', 'Trend_Sentiment_Score']
+            X = pd.DataFrame([features], columns=cols)
             
             prob = model_b.predict_proba(X)[0][1]
             ai_pred_raw = float(prob)
@@ -1000,7 +1010,7 @@ def _score_trend_alignment(groq_result, metadata, audio_transcript, benchmarks):
 
     scores["ai_prediction"] = {
         "raw": ai_pred_raw, 
-        "label": f"Dự báo Viral: {ai_pred_raw*100:.1f}% (AI Model)"
+        "label": f"Dự báo Viral: {ai_pred_raw*100:.1f}% (V-Pulse AI)"
     }
     # Update weight for AI prediction
     weights["ai_prediction"] = 20
@@ -1229,12 +1239,15 @@ def process_video(video_data: dict):
         ocr_text = _run_ocr(cv2_frames)
         print(f"         OCR: {ocr_text[:80]}...")
 
-        # ── BƯỚC 4: Groq tổng hợp tất cả (1 lệnh thay 3 model) ──
-        print("  [4/5] 🧠 Calling Groq AI (Summarize + Categorize + Sentiment)...")
+        # ── BƯỚC 4: Gọi Groq AI để tóm tắt và đánh giá xu hướng ──
+        print("  [4/5] 🤖 Calling Groq AI (Llama-3)...")
         _update_status(video_id, "summarizing")
+        
+        benchmarks = _get_cached_benchmarks()
         groq_result = _call_groq(
             audio_text, ocr_text, blip_text, caption,
-            video_data.get("top_comments", []),
+            trending_data=benchmarks,
+            top_comments=video_data.get("top_comments", []),
         )
 
         # PHÂN TÍCH LẠI: Nếu AI trả về "🌍 Khác" (không khớp danh mục), thử gọi lại lần 2
@@ -1242,8 +1255,10 @@ def process_video(video_data: dict):
             print("    ⚠️ AI trả về danh mục '🌍 Khác'. Đang tiến hành phân tích lại lần nữa...")
             # Thêm một chút thay đổi vào prompt để ép AI phải chọn
             groq_result = _call_groq(
-                audio_text, ocr_text, blip_text, caption + " (Vui lòng PHÂN TÍCH KỸ và CHỌN 1 TRONG CÁC DANH MỤC ĐÃ CHO, KHÔNG ĐƯỢC BỎ QUA)",
-                video_data.get("top_comments", []),
+                audio_text, ocr_text, blip_text, 
+                caption + " (Vui lòng PHÂN TÍCH KỸ và CHỌN 1 TRONG CÁC DANH MỤC ĐÃ CHO, KHÔNG ĐƯỢC BỎ QUA)",
+                trending_data=benchmarks,
+                top_comments=video_data.get("top_comments", []),
             )
             
             # Nếu phân tích lại vẫn là "🌍 Khác" -> Đánh dấu là lỗi luôn

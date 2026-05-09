@@ -1,0 +1,13 @@
+{
+  "accuracy": 0.9807,
+  "features": [
+    "Like_Rate",
+    "Comment_Rate",
+    "Share_Rate",
+    "Save_Rate",
+    "Positive_Score",
+    "Views_Per_Hour"
+  ],
+  "trained_at": "2026-05-09T18:30:57.209119",
+  "model_file": "engagement_predictor.joblib"
+}

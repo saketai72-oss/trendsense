@@ -511,7 +511,15 @@ def get_recent_videos(days=14):
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT * FROM videos WHERE scrape_date >= %s AND ai_status = 'completed' AND views > 0", (cutoff,))
+            # Chỉ lấy các cột cần thiết cho Training để tránh timeout và tốn RAM
+            columns = [
+                "video_id", "views", "likes", "comments", "shares", "saves", 
+                "viral_velocity", "views_per_hour", "positive_score", 
+                "video_duration", "scene_cut_count", "video_orientation", 
+                "category", "top_keywords"
+            ]
+            query = f"SELECT {', '.join(columns)} FROM videos WHERE scrape_date >= %s AND ai_status = 'completed' AND views > 0"
+            cursor.execute(query, (cutoff,))
             return cursor.fetchall()
     finally:
         conn.close()

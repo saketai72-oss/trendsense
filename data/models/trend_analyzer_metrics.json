@@ -1,0 +1,16 @@
+{
+  "training_samples": 2075,
+  "window_days": 14,
+  "accuracy": 0.8458,
+  "features": [
+    "KW_Match_Count",
+    "Cat_Hotness",
+    "Duration",
+    "Cuts_Per_Sec",
+    "Is_Portrait",
+    "Is_Ideal_Duration",
+    "Trend_Sentiment_Score"
+  ],
+  "trained_at": "2026-05-09T18:30:58.945211",
+  "model_file": "trend_analyzer.joblib"
+}
