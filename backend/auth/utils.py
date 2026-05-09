@@ -1,14 +1,9 @@
-"""
-Authentication Utilities — Password Hashing & JWT Tokens
-=========================================================
-Production-grade auth utilities using bcrypt + PyJWT.
-"""
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 import jwt
-from passlib.context import CryptContext
 
 from core.config.backend_settings import (
     JWT_SECRET_KEY,
@@ -18,17 +13,15 @@ from core.config.backend_settings import (
 )
 
 # ── Password Hashing ─────────────────────────────────────────────────────────
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
+# Dùng bcrypt trực tiếp (tránh xung đột passlib vs bcrypt>=4.0.0 trên Python 3.12)
 def hash_password(password: str) -> str:
     """Hash a plain-text password using bcrypt."""
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain-text password against its bcrypt hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 # ── JWT Token Creation ───────────────────────────────────────────────────────
