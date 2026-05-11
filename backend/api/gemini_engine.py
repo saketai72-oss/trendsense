@@ -7,6 +7,7 @@ from google import genai
 from google.genai import types
 from core.config import service_settings as settings
 from core.db.models import update_ai_results, update_upload_analysis, insert_video_metadata
+from backend.api.llm_client import chat_completion
 from services.tiktok_scraper.video_downloader import download_video
 from services.ai_engine.math_utils import calculate_metrics
 
@@ -36,10 +37,85 @@ def _delete_gemini_file(file_name):
     except Exception as e:
         logger.error(f"Lỗi khi xoá file trên Gemini {file_name}: {e}")
 
+def _fallback_to_llm(video_data: dict) -> bool:
+    """Fallback sử dụng OpenRouter/Groq (text‑only) cho scraper videos.
+       Trả về True nếu thành công, False nếu thất bại."""
+    import json
+    from services.ai_engine.math_utils import calculate_metrics
+    video_id = video_data.get("video_id")
+    caption = video_data.get("caption", "")
+    top_comments = video_data.get("top_comments", [])
+    views = video_data.get("views", 0)
+    likes = video_data.get("likes", 0)
+    comments_count = video_data.get("comments", 0)
+    shares = video_data.get("shares", 0)
+    saves = video_data.get("saves", 0)
+
+    system_prompt = "Bạn là AI phân tích xu hướng TikTok. Chỉ trả về JSON hợp lệ."
+    user_prompt = f"""Phân tích video TikTok dựa trên các thông tin sau (không có nội dung video gốc):
+
+Caption: {caption}
+Top bình luận: {json.dumps(top_comments[:5], ensure_ascii=False)}
+Lượt xem: {views}, thích: {likes}, bình luận: {comments_count}, chia sẻ: {shares}, lưu: {saves}
+
+Hãy trả về JSON với các trường:
+- summary (string, tóm tắt ngắn ~20 từ, tiếng Việt)
+- category (string, chọn từ danh sách: {', '.join(STANDARD_CATEGORIES)})
+- sentiment (string, một trong "🟢 TÍCH CỰC", "🟡 TRUNG LẬP", "🔴 TIÊU CỰC")
+- positive_score (float, 0-100)
+- keywords (list of strings, 3-5 từ khóa tiếng Việt)
+- audio_transcript (string, để trống "")
+"""
+
+    try:
+        response_text = chat_completion(prompt=user_prompt, system=system_prompt, response_format="json_object")
+        result = json.loads(response_text)
+
+        # Validate category
+        cat = result.get("category", "🌍 Khác")
+        matched = "🌍 Khác"
+        for std in STANDARD_CATEGORIES:
+            if std.lower() == cat.lower() or (" " in std and std.split(" ", 1)[-1].lower() in cat.lower()):
+                matched = std
+                break
+
+        # Tính metrics
+        vph, er, velocity = calculate_metrics(
+            views=views, likes=likes, comments=comments_count,
+            shares=shares, saves=saves,
+            create_time=video_data.get("create_time", 0)
+        )
+
+        final_data = {
+            "video_description": result.get("summary", ""),
+            "category": matched,
+            "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
+            "positive_score": float(result.get("positive_score", 50.0)),
+            "top_keywords": ", ".join(result.get("keywords", [])[:5]),
+            "audio_transcript": result.get("audio_transcript", ""),
+            "ai_status": "completed",
+            "views_per_hour": vph,
+            "engagement_rate": er,
+            "viral_velocity": velocity,
+        }
+        update_ai_results(video_id, final_data)
+        logger.info(f"✅ Fallback LLM thành công cho scraper video {video_id}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Fallback LLM thất bại cho {video_id}: {e}")
+        _fallback_error_db(video_id, f"LLM fallback error: {str(e)[:100]}")
+        return False
+
 def _trigger_modal_fallback(video_data: dict) -> bool:
-    """Fallback gọi sang Modal nếu Gemini gặp sự cố. Returns True nếu thành công."""
+    """Fallback gọi sang Modal nếu Gemini gặp sự cố (chỉ dành cho upload). Returns True nếu thành công."""
     from core.config.backend_settings import MODAL_WEBHOOK_URL
     video_id = video_data.get("video_id")
+    if not video_id:
+        logger.error("❌ _trigger_modal_fallback: video_id is None")
+        return False
+    if not video_id.startswith("upload_"):
+        logger.warning(f"⚠️ Modal fallback chỉ dành cho upload, nhưng video {video_id} là scraper. Dùng LLM fallback thay thế.")
+        return _fallback_to_llm(video_data)
     if not MODAL_WEBHOOK_URL:
         logger.error(f"❌ Không có MODAL_WEBHOOK_URL để fallback cho {video_id}.")
         _fallback_error_db(video_id, "Gemini quota exceeded & no Modal fallback configured")
@@ -93,8 +169,11 @@ def process_video_with_gemini(video_data: dict):
     except Exception as e:
         err_msg = str(e).lower()
         if "blocked" in err_msg or "403" in err_msg:
-            logger.warning(f"⚠️ IP local bị chặn khi tải {video_id}. Đang chuyển hướng sang Modal...")
-            _trigger_modal_fallback(video_data)
+            logger.warning(f"⚠️ IP local bị chặn khi tải {video_id}.")
+            if video_id and video_id.startswith("upload_"):
+                _trigger_modal_fallback(video_data)
+            else:
+                _fallback_to_llm(video_data)
             return
         raise e
 
@@ -102,8 +181,11 @@ def process_video_with_gemini(video_data: dict):
         logger.error(f"❌ Không thể tải video {video_id} (Có thể bị xoá hoặc bị chặn).")
         # Thử kiểm tra xem có phải do bị chặn ngầm không (yt-dlp đôi khi không văng exception)
         # Nếu link vẫn sống mà không tải được -> Khả năng cao là IP block
-        logger.warning(f"⚠️ Link video {video_id} không tải được file. Thử đẩy sang Modal làm phương án cuối...")
-        _trigger_modal_fallback(video_data)
+        logger.warning(f"⚠️ Link video {video_id} không tải được file.")
+        if video_id and video_id.startswith("upload_"):
+            _trigger_modal_fallback(video_data)
+        else:
+            _fallback_to_llm(video_data)
         return
 
     gemini_file = None
@@ -235,9 +317,12 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
 
         if is_quota_err:
             # Daily quota exhausted (free tier 20/ngày) — retry vô nghĩa,
-            # fallback sang Modal ngay lập tức.
-            logger.warning(f"🚫 Gemini daily quota exhausted → Fallback sang Modal.")
-            _trigger_modal_fallback(video_data)
+            # fallback sang Modal (upload) hoặc LLM (scraper).
+            logger.warning(f"🚫 Gemini daily quota exhausted.")
+            if video_id and video_id.startswith("upload_"):
+                _trigger_modal_fallback(video_data)
+            else:
+                _fallback_to_llm(video_data)
         elif "429" in err_msg or "503" in err_msg:
             # Temporary rate limit — sleep rồi re-raise cho RQ retry
             # (RQ sẽ re-enqueue job sau interval: 60s → 180s → 600s)
@@ -245,9 +330,12 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
             time.sleep(60)
             raise  # Re-raise để RQ bắt được
         else:
-            # Lỗi hệ thống (timeout, 500, IP blocked, v.v.) → Modal fallback
-            logger.info("📡 Lỗi hệ thống → Kích hoạt Fallback sang Modal.")
-            _trigger_modal_fallback(video_data)
+            # Lỗi hệ thống (timeout, 500, IP blocked, v.v.)
+            logger.info("📡 Lỗi hệ thống.")
+            if video_id and video_id.startswith("upload_"):
+                _trigger_modal_fallback(video_data)
+            else:
+                _fallback_to_llm(video_data)
     
     finally:
         # BƯỚC 8: Xoá file Gemini để giải phóng Quota

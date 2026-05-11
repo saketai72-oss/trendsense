@@ -168,6 +168,7 @@ def main():
 
     # 2. Duyệt pool link — DỪNG SỚM khi đủ target video Việt
     for i, link in enumerate(links, 1):
+        is_from_api = False  # Flag: True nếu dữ liệu lấy từ TikTokApi (bỏ qua langdetect)
         # ĐỦ RỒI → dừng sớm, không cào thêm
         if saved_count >= target:
             print(f"\n[✓] Đã đủ {target} video Việt — Dừng cào sớm!")
@@ -219,6 +220,7 @@ def main():
                     'Saves': api_data.get('saves', 0),
                     'Create_Time': str(api_data.get('create_time', stats.get('Create_Time', '0'))),
                 }
+                is_from_api = True
                 print(f"  [📊] Stats (Selenium lỗi, dùng TikTokApi): 👁️{stats['Views']:,} | ❤️{stats['Likes']:,} | 💬{stats['Comments']:,}")
             else:
                 print(f"  [📊] Stats (từ Selenium): 👁️{stats.get('Views', 0):,} | ❤️{stats.get('Likes', 0):,} | 💬{stats.get('Comments', 0):,}")
@@ -235,6 +237,7 @@ def main():
                     'Saves': api_data.get('saves', 0),
                     'Create_Time': str(api_data.get('create_time', 0)),
                 }
+                is_from_api = True
                 print(f"  [📊] Stats (từ TikTokApi - Fallback): 👁️{stats['Views']:,} | ❤️{stats['Likes']:,} | 💬{stats['Comments']:,}")
             else:
                 if is_blocked(driver):
@@ -270,22 +273,32 @@ def main():
             continue
 
         # === BỘ LỌC NGÔN NGỮ (TRƯỚC KHI CÀO COMMENTS — TIẾT KIỆM THỜI GIAN) ===
-        caption_text = str(stats.get('Caption', '')).strip()
-        if caption_text:
-            try:
-                lang = detect(caption_text)
-                if lang != 'vi':
-                    skipped_lang += 1
-                    print(f"  [✂️] Bỏ qua video quốc tế (Ngôn ngữ: {lang}). Đã bỏ qua: {skipped_lang}")
-                    
-                    # Vẫn đánh dấu là đã cào để không bị lặp lại lần sau
-                    video_id = extract_video_id(link)
-                    if video_id:
-                        mark_as_scraped(video_id)
-                    continue
-            except LangDetectException:
-                # Nếu caption chỉ toàn emoji hoặc số (không detect được) → cho qua
-                pass
+        # Nếu dữ liệu đến từ TikTokApi (đã lọc đúng hashtag Việt), bỏ qua kiểm tra ngôn ngữ
+        if not is_from_api:
+            caption_text = str(stats.get('Caption', '')).strip()
+            if caption_text:
+                # Bước 1: Kiểm tra ký tự đặc trưng tiếng Việt (có dấu)
+                from core.utils.lang_utils import is_vietnamese_text
+                viet_char_check = is_vietnamese_text(caption_text)
+                if viet_char_check is True:
+                    # Chắc chắn là tiếng Việt → giữ lại, không cần langdetect
+                    pass
+                else:
+                    # Không có dấu tiếng Việt → dùng langdetect làm fallback
+                    try:
+                        lang = detect(caption_text)
+                        if lang != 'vi':
+                            skipped_lang += 1
+                            print(f"  [✂️] Bỏ qua video quốc tế (Ngôn ngữ: {lang}). Đã bỏ qua: {skipped_lang}")
+                            
+                            # Vẫn đánh dấu là đã cào để không bị lặp lại lần sau
+                            video_id = extract_video_id(link)
+                            if video_id:
+                                mark_as_scraped(video_id)
+                            continue
+                    except LangDetectException:
+                        # Nếu caption chỉ toàn emoji hoặc số (không detect được) → cho qua
+                        pass
 
         # 3. Đóng gói dữ liệu và ghi vào Postgres (không cào bình luận)
         video_id = extract_video_id(link)
