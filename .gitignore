@@ -38,4 +38,4 @@ frontend/.next/
 .qwen/
 
 scripts/
-debug_snapshots/
+debug_snapshots/    
