@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 from core.config import service_settings as settings
 from core.db.models import update_ai_results, update_upload_analysis, insert_video_metadata
-from backend.api.llm_client import chat_completion
+from backend.api.llm_client import chat_completion_json
 from services.tiktok_scraper.video_downloader import download_video
 from services.ai_engine.math_utils import calculate_metrics
 
@@ -68,8 +68,7 @@ Hãy trả về JSON với các trường:
 """
 
     try:
-        response_text = chat_completion(prompt=user_prompt, system=system_prompt, response_format="json_object")
-        result = json.loads(response_text)
+        result = chat_completion_json(prompt=user_prompt, system=system_prompt)
 
         # Validate category
         cat = result.get("category", "🌍 Khác")
