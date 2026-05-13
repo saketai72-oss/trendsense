@@ -46,8 +46,21 @@ def create_upload_url(video_id: str, filename: str, expires_in: int = 600) -> Tu
 
     supabase = _get_supabase_client()
 
-    # Normalize filename để tránh path traversal
-    safe_filename = filename.replace("/", "_").replace("..", "_") or "video.mp4"
+    import os
+    import re
+    
+    # Extract extension and sanitize
+    ext = os.path.splitext(filename)[1].lower()
+    if not ext or len(ext) > 5:
+        ext = ".mp4"
+        
+    # Replace non-ascii and spaces with underscore to prevent all URL and log encoding errors
+    base = os.path.splitext(filename)[0]
+    safe_base = re.sub(r'[^a-zA-Z0-9_]', '_', base)
+    if not safe_base:
+        safe_base = "video"
+        
+    safe_filename = f"{safe_base}{ext}"
     storage_path = f"uploads/{video_id}/{safe_filename}"
 
     # Tạo signed upload URL (PUT method)

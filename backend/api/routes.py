@@ -474,6 +474,23 @@ def my_video_delete(video_id: str, user: dict = Depends(get_current_user)):
 
 
 # ─────────────────────────────────────────────────────
+# GET /api/trending/keywords — Get current trending keywords & categories
+# ─────────────────────────────────────────────────────
+@router.get("/trending/keywords")
+def trending_keywords():
+    """Lấy danh sách từ khóa, hashtag, danh mục đang trend từ báo cáo tuần gần nhất."""
+    from services.ai_engine.trend_analyzer import load_latest_trend_report
+    report = load_latest_trend_report()
+    if not report:
+        return {"keywords": [], "hashtags": [], "categories": []}
+    return {
+        "keywords": report.get("keywords", []),
+        "hashtags": report.get("hashtags", []),
+        "categories": report.get("categories", [])
+    }
+
+
+# ─────────────────────────────────────────────────────
 # Internal: Generate Recommendations (OpenRouter → Groq)
 # ─────────────────────────────────────────────────────
 def _generate_recommendations(video: dict) -> dict:
