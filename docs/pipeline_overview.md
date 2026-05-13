@@ -256,13 +256,13 @@ viral_velocity = (views_per_hour × engagement_rate) / log10(age_hours + 10)
 | **Metrics tính toán** | `views_per_hour`, `engagement_rate`, `viral_velocity`, `viral_probability` |
 | **AI Analysis** | `video_description`, `category (TEXT[])`, `video_sentiment`, `positive_score`, `top_keywords`, `audio_transcript`, `embedding (vector 768)` |
 | **Upload Analysis** | `video_duration`, `video_orientation`, `scene_cut_count`, `trend_alignment_score`, `trend_insights (JSONB)` |
-| **Trạng thái** | `ai_status` (`pending`/`downloading`/`analyzing`/`summarizing`/`completed`/`error`/`user_pending`), `is_rescraped` |
+| **Trạng thái** | `ai_status` (`pending`/`downloading`/`analyzing`/`summarizing`/`completed`/`error`/`user_pending`) |
 
 ### Bảng `history` — Dedup Scraper:
 - Lưu `video_id` đã cào để tránh cào lại. `mark_as_scraped()` / `is_scraped()`
 
 ### Indexes:
-- `idx_ai_status`, `idx_scrape_date`, `idx_category`, `idx_is_rescraped`
+- `idx_ai_status`, `idx_scrape_date`, `idx_category`
 - `idx_videos_embedding` — **Tạm bỏ**: Supabase pgvector giới hạn 2000 dims cho IVFFlat/HNSW. Sequential scan đủ nhanh (<50ms) với ~2000 rows. Khi Supabase nâng cấp pgvector >= 0.7.0, tạo lại: `CREATE INDEX idx_videos_embedding ON videos USING hnsw (embedding vector_cosine_ops);`
 
 ### Các hàm DB quan trọng (`core/db/models.py`, ~640 lines):
