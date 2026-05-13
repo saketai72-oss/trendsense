@@ -16,7 +16,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 from core.config import service_settings as settings
 from core.db.models import is_scraped, extract_video_id
 from services.tiktok_scraper.hashtag_fetcher import fetch_hashtag_videos
-from services.tiktok_scraper.worker_fetcher import fetch_via_worker
 
 BUFFER_MULTIPLIER = 3
 
@@ -58,18 +57,7 @@ def get_trending_links(driver, target_count=settings.MAX_VIDEOS):
         print(f"  [!] Không parse được tag từ URL: {current_url}")
         return links
 
-    # === CHIẾN LƯỢC 1: Cloudflare Worker (CDN IP, miễn phí) ===
-    print(f"  [🌐] Thử Cloudflare Worker cho #{tag}...")
-    worker_urls = fetch_via_worker(tag, max_videos=buffer_target)
-    for url in worker_urls:
-        video_id = extract_video_id(url)
-        if video_id and not is_scraped(video_id):
-            clean_link = url.split('?')[0]
-            if clean_link not in links:
-                links.append(clean_link)
-                print(f"  + Chốt video MỚI (Worker): {video_id} ({len(links)}/{buffer_target})")
-        if len(links) >= buffer_target:
-            break
+    # Cloudflare Worker strategy disabled (worker_fetcher removed)
 
     # === CHIẾN LƯỢC 2: TikTokApi (anti-bot) — trả cả stats ===
     if not links:
