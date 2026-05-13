@@ -42,13 +42,14 @@ def init_db():
                     category TEXT[],
                     video_description TEXT,
                     ai_status VARCHAR(20) DEFAULT 'pending',
-                    is_rescraped BOOLEAN DEFAULT FALSE,
-                    audio_transcript TEXT
+                    audio_transcript TEXT,
+                    video_duration REAL DEFAULT 0
                 )
             ''')
-            # Only keep audio_transcript column (others dropped)
+            # Columns to add for backward compatibility
             for col_sql in [
                 "ALTER TABLE videos ADD COLUMN IF NOT EXISTS audio_transcript TEXT",
+                "ALTER TABLE videos ADD COLUMN IF NOT EXISTS video_duration REAL DEFAULT 0",
             ]:
                 try:
                     cursor.execute(col_sql)
@@ -112,7 +113,6 @@ def init_db():
 
             # Indexes
             for idx_sql in [
-                'CREATE INDEX IF NOT EXISTS idx_is_rescraped ON videos(is_rescraped)',
                 'CREATE INDEX IF NOT EXISTS idx_ai_status ON videos(ai_status)',
                 'CREATE INDEX IF NOT EXISTS idx_scrape_date ON videos(scrape_date)',
                 'CREATE INDEX IF NOT EXISTS idx_category ON videos(category)',
@@ -222,7 +222,7 @@ def update_rescraped_stats_only(video_id, data_dict):
                 UPDATE videos SET
                     caption = %s, views = %s, likes = %s, comments = %s,
                     shares = %s, saves = %s, create_time = %s,
-                    scrape_date = %s, is_rescraped = TRUE
+                    scrape_date = %s
                 WHERE video_id = %s
             '''
             cursor.execute(query, (
@@ -257,7 +257,7 @@ def update_rescraped_metadata(video_id, data_dict):
                 UPDATE videos SET
                     caption = %s, views = %s, likes = %s, comments = %s,
                     shares = %s, saves = %s, create_time = %s,
-                    scrape_date = %s, is_rescraped = TRUE,
+                    scrape_date = %s,
                     ai_status = 'pending'
                 WHERE video_id = %s
             '''
@@ -291,7 +291,7 @@ def get_high_potential_videos(threshold=40.0):
                     video_id, link, caption, views, likes, comments, shares, saves,
                     create_time, scrape_date, views_per_hour, engagement_rate, viral_velocity,
                     positive_score, video_sentiment, top_keywords, viral_probability, category,
-                    video_description, ai_status, is_rescraped, audio_transcript
+                    video_description, ai_status, audio_transcript
                 FROM videos 
                 WHERE viral_probability > %s OR engagement_rate > %s
                 ORDER BY viral_probability DESC
@@ -396,7 +396,7 @@ def get_pending_videos():
                     video_id, link, caption, views, likes, comments, shares, saves,
                     create_time, scrape_date, views_per_hour, engagement_rate, viral_velocity,
                     positive_score, video_sentiment, top_keywords, viral_probability, category,
-                    video_description, ai_status, is_rescraped, audio_transcript
+                    video_description, ai_status, audio_transcript
                 FROM videos
                 WHERE ai_status = 'pending' AND views > 0
                 ORDER BY scrape_date DESC
@@ -550,11 +550,19 @@ def get_all_analyzed_videos(page: int = 1, per_page: int = 20,
             total = count_row["total"] if count_row else 0
 
             offset = (page - 1) * per_page
+            # Explicit column list (excluding is_rescraped)
+            columns = [
+                "video_id", "link", "caption", "views", "likes", "comments", "shares", "saves",
+                "create_time", "scrape_date", "views_per_hour", "engagement_rate", "viral_velocity",
+                "positive_score", "video_sentiment", "top_keywords", "viral_probability", "category",
+                "video_description", "ai_status", "audio_transcript"
+            ]
+            col_str = ", ".join(columns)
             if semantic_video_ids is not None and len(semantic_video_ids) > 0:
                 order_clause = "array_position(%s::text[], video_id)"
-                cur.execute(f"SELECT * FROM videos WHERE {where_sql} ORDER BY {order_clause} LIMIT %s OFFSET %s", params + [semantic_video_ids, per_page, offset])
+                cur.execute(f"SELECT {col_str} FROM videos WHERE {where_sql} ORDER BY {order_clause} LIMIT %s OFFSET %s", params + [semantic_video_ids, per_page, offset])
             else:
-                cur.execute(f"SELECT * FROM videos WHERE {where_sql} ORDER BY {sort_by} {order} NULLS LAST LIMIT %s OFFSET %s", params + [per_page, offset])
+                cur.execute(f"SELECT {col_str} FROM videos WHERE {where_sql} ORDER BY {sort_by} {order} NULLS LAST LIMIT %s OFFSET %s", params + [per_page, offset])
             return cur.fetchall(), total
     finally:
         conn.close()
@@ -569,7 +577,7 @@ def get_video_by_id(video_id: str):
                     video_id, link, caption, views, likes, comments, shares, saves,
                     create_time, scrape_date, views_per_hour, engagement_rate, viral_velocity,
                     positive_score, video_sentiment, top_keywords, viral_probability, category,
-                    video_description, ai_status, is_rescraped, audio_transcript
+                    video_description, ai_status, audio_transcript
                 FROM videos
                 WHERE video_id = %s
             """, (video_id,))
@@ -593,7 +601,6 @@ def get_video_by_id(video_id: str):
                     COALESCE(va.category, '{}'::TEXT[]) as category,
                     COALESCE(va.video_description, '') as video_description,
                     va.ai_status,
-                    FALSE as is_rescraped,
                     va.video_duration, va.video_orientation, va.scene_cut_count,
                     va.trend_alignment_score, va.trend_insights, va.audio_transcript,
                     va.user_id,
