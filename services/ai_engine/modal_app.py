@@ -13,6 +13,11 @@ và đặt vào MODAL_WEBHOOK_URL trong .env + GitHub Secrets.
 """
 import modal
 import os
+import difflib
+
+# NOTE: 'services' và 'core' được mount vào container Modal qua modal.Mount.
+# KHÔNG import trực tiếp ở top-level vì các module này không tồn tại khi
+# Modal parse file này trên local machine trước khi deploy.
 
 # ============================================================
 # MODAL APP DEFINITION
@@ -27,6 +32,7 @@ base_image = (
 )
 
 # --- Image phân tầng cho GPU ---
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 gpu_image = (
     base_image
     # Layer 1: Thư viện NẶNG (ít thay đổi → cache lâu dài)
@@ -47,6 +53,22 @@ gpu_image = (
         "Pillow",
         "psycopg2-binary",
         "requests",
+        "joblib",
+        "pandas",
+        "scikit-learn",
+        "nvidia-cublas-cu12",
+        "nvidia-cudnn-cu12",
+    )
+    # Layer 3: Project Files (thay đổi thường xuyên)
+    .add_local_dir(
+        os.path.join(project_root, "services"),
+        remote_path="/app/services",
+        ignore=["*.mp4", "__pycache__"]
+    )
+    .add_local_dir(
+        os.path.join(project_root, "core"),
+        remote_path="/app/core",
+        ignore=["__pycache__"]
     )
 )
 
@@ -451,23 +473,67 @@ def _normalize_groq_result(data: dict) -> dict:
     """Chuẩn hóa dữ liệu trả về từ LLM."""
 
     # --- Validate & normalize category ---
-    cat = data.get("category", "🌍 Khác")
+    raw_cat = data.get("category", "🌍 Khác")
+    # Helper to strip emojis
+    import re
+    def strip_emoji(text):
+        emoji_pattern = re.compile("["
+            u"\U0001F600-\U0001F64F"  # emoticons
+            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+            u"\U0001F680-\U0001F6FF"  # transport & map symbols
+            u"\U0001F700-\U0001F77F"  # alchemical symbols
+            u"\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
+            u"\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
+            u"\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+            u"\U0001FA00-\U0001FA6F"  # Chess Symbols
+            u"\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
+            u"\U00002702-\U000027B0"  # Dingbats
+            u"\U000024C2-\U0001F251" 
+            "]+", flags=re.UNICODE)
+        return emoji_pattern.sub(r'', text).strip()
+    
+    clean_raw = strip_emoji(raw_cat).lower()
     matched = "🌍 Khác"
+    # Exact match after stripping emojis
     for std in STANDARD_CATEGORIES:
-        if std.lower() == cat.lower():
+        clean_std = strip_emoji(std).lower()
+        if clean_raw == clean_std:
             matched = std
             break
-        # Fuzzy match: bỏ emoji, so sánh tên
-        if " " in std and std.split(" ", 1)[-1].lower() in cat.lower():
-            matched = std
-            break
+    if matched == "🌍 Khác":
+        # Fuzzy matching
+        clean_std_list = [strip_emoji(cat).lower() for cat in STANDARD_CATEGORIES]
+        close_matches = difflib.get_close_matches(clean_raw, clean_std_list, n=1, cutoff=0.6)
+        if close_matches:
+            idx = clean_std_list.index(close_matches[0])
+            matched = STANDARD_CATEGORIES[idx]
+    
+    # If still unknown, try to use the multi-category classifier (offline)
+    if matched == "🌍 Khác":
+        # Gather text for classification
+        text_for_class = " ".join(filter(None, [
+            data.get("summary", ""),
+            data.get("caption_evaluation", ""),
+            data.get("content_trend_match", ""),
+            data.get("video_description", "")
+        ]))
+        try:
+            from services.ai_engine.categorizer import categorize_multiple
+            cats = categorize_multiple(text_for_class, max_cats=3)
+            if cats:
+                # Take the first category as the primary (the database can store multiple later)
+                matched = cats[0]
+        except Exception:
+            pass
+    
     data["category"] = matched
 
     # --- Validate sentiment ---
     sentiment = data.get("sentiment", "🟡 TRUNG LẬP")
-    if "TÍCH CỰC" in sentiment.upper():
+    sentiment_lower = sentiment.lower()
+    if any(term in sentiment_lower for term in ["tích cực", "positive", "vui", "tốt"]):
         data["sentiment"] = "🟢 TÍCH CỰC"
-    elif "TIÊU CỰC" in sentiment.upper():
+    elif any(term in sentiment_lower for term in ["tiêu cực", "negative", "buồn", "xấu"]):
         data["sentiment"] = "🔴 TIÊU CỰC"
     else:
         data["sentiment"] = "🟡 TRUNG LẬP"
@@ -594,6 +660,12 @@ def _update_supabase(video_id, results):
     conn = psycopg2.connect(db_url)
     try:
         with conn.cursor() as cur:
+            # Ensure category is always a non-empty list (at least ["🌍 Khác"])
+            cat_val = results.get("category")
+            if not cat_val or cat_val in ["🌍 Khác", "Lỗi"]:
+                cat_list = ["🌍 Khác"]
+            else:
+                cat_list = [cat_val]  # For now, store as single-element list; can be extended for multiple categories
             cur.execute(
                 """
                 UPDATE videos SET
@@ -610,7 +682,7 @@ def _update_supabase(video_id, results):
                 WHERE video_id = %s
                 """,
                 (
-                    [results.get("category")] if results.get("category") not in ["🌍 Khác", "Lỗi"] else [],
+                    cat_list,
                     results.get("video_description", ""),
                     results.get("top_keywords", ""),
                     results.get("video_sentiment", "🟡 TRUNG LẬP"),
@@ -639,7 +711,17 @@ def _update_status(video_id, status):
     conn = psycopg2.connect(db_url)
     try:
         with conn.cursor() as cur:
-            cur.execute("UPDATE videos SET ai_status = %s WHERE video_id = %s", (status, video_id))
+            if video_id.startswith("upload_"):
+                # Cập nhật video_analyses để polling HTTP nhận được
+                cur.execute("UPDATE video_analyses SET ai_status = %s WHERE video_id = %s", (status, video_id))
+                # Phải đảm bảo có record bên videos để Supabase Realtime kích hoạt event cho Frontend
+                cur.execute("""
+                    INSERT INTO videos (video_id, ai_status) 
+                    VALUES (%s, %s) 
+                    ON CONFLICT (video_id) DO UPDATE SET ai_status = EXCLUDED.ai_status
+                """, (video_id, status))
+            else:
+                cur.execute("UPDATE videos SET ai_status = %s WHERE video_id = %s", (status, video_id))
         conn.commit()
     except Exception as e:
         print(f"    [!] Status update error: {e}")
@@ -1114,17 +1196,24 @@ def _update_supabase_upload(video_id, results):
     try:
         with conn.cursor() as cur:
             # Ghi toàn bộ kết quả phân tích vào video_analyses
+            # Ensure category is always a non-empty list (at least ["🌍 Khác"])
+            cat_val = results.get("category")
+            if isinstance(cat_val, list) and cat_val:
+                cat_list = cat_val
+            elif not cat_val or cat_val in ["🌍 Khác", "Lỗi"]:
+                cat_list = ["🌍 Khác"]
+            else:
+                cat_list = [cat_val]
+
             cur.execute(
                 """
                 INSERT INTO video_analyses (
-                    video_id, user_id, category, video_description, top_keywords,
+                    video_id, category, video_description, top_keywords,
                     video_sentiment, positive_score, video_duration, video_orientation,
                     scene_cut_count, trend_alignment_score, trend_insights,
                     audio_transcript, ai_status
                 ) VALUES (
-                    %s,
-                    (SELECT user_id FROM videos WHERE video_id = %s),
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (video_id) DO UPDATE SET
                     category = EXCLUDED.category,
@@ -1142,8 +1231,8 @@ def _update_supabase_upload(video_id, results):
                     updated_at = NOW()
                 """,
                 (
-                    video_id, video_id,
-                    [results.get("category")] if results.get("category") not in ["🌍 Khác", "Lỗi"] else [],
+                    video_id,
+                    cat_list,
                     results.get("video_description", ""),
                     results.get("top_keywords", ""),
                     results.get("video_sentiment", "🟡 TRUNG LẬP"),
@@ -1185,6 +1274,9 @@ def process_video(video_data: dict):
     Pipeline xử lý hoàn chỉnh cho 1 video TikTok (chạy trên GPU T4):
     Download → Whisper → BLIP → EasyOCR → Groq AI → Metrics → Supabase
     """
+    import sys as _sys
+    if "/app" not in _sys.path:
+        _sys.path.insert(0, "/app")
     video_id = video_data.get("video_id", "unknown")
     url = video_data.get("url", "")
     caption = video_data.get("caption", "")
@@ -1226,23 +1318,18 @@ def process_video(video_data: dict):
         _update_status(video_id, "analyzing")
         pil_frames, cv2_frames = _extract_frames(video_path, total_frames=4, ocr_frames=1)
 
-        # ── BƯỚC 3: Chạy 3 AI models đa phương thức ──
         print("  [3/5] 🎧 Running Whisper (Audio → Text)...")
         audio_text = _run_whisper(video_path)
-        print(f"         Audio: {audio_text[:80]}...")
 
         print("        👁️ Running BLIP (Vision → Caption)...")
         blip_text = _run_blip(pil_frames)
-        print(f"         Vision: {blip_text[:80]}...")
 
         print("        📝 Running EasyOCR (Screen → Text)...")
         ocr_text = _run_ocr(cv2_frames)
-        print(f"         OCR: {ocr_text[:80]}...")
 
-        # ── BƯỚC 4: Gọi Groq AI để tóm tắt và đánh giá xu hướng ──
+        # ── BƯỚC 3: Tổng hợp bằng AI (Groq/OpenRouter) ──
         print("  [4/5] 🤖 Calling Groq AI (Llama-3)...")
         _update_status(video_id, "summarizing")
-        
         benchmarks = _get_cached_benchmarks()
         groq_result = _call_groq(
             audio_text, ocr_text, blip_text, caption,
@@ -1250,26 +1337,22 @@ def process_video(video_data: dict):
             top_comments=video_data.get("top_comments", []),
         )
 
-        # PHÂN TÍCH LẠI: Nếu AI trả về "🌍 Khác" (không khớp danh mục), thử gọi lại lần 2
+        # Re-check category if "🌍 Khác"
         if groq_result.get("category") == "🌍 Khác" and groq_result.get("ai_status", "completed") != "error":
-            print("    ⚠️ AI trả về danh mục '🌍 Khác'. Đang tiến hành phân tích lại lần nữa...")
-            # Thêm một chút thay đổi vào prompt để ép AI phải chọn
+            print("        [🔄] Re-checking category with strict prompt...")
             groq_result = _call_groq(
-                audio_text, ocr_text, blip_text, 
-                caption + " (Vui lòng PHÂN TÍCH KỸ và CHỌN 1 TRONG CÁC DANH MỤC ĐÃ CHO, KHÔNG ĐƯỢC BỎ QUA)",
+                audio_text, ocr_text, blip_text, caption,
                 trending_data=benchmarks,
                 top_comments=video_data.get("top_comments", []),
             )
-            
-            # Nếu phân tích lại vẫn là "🌍 Khác" -> Đánh dấu là lỗi luôn
             if groq_result.get("category") == "🌍 Khác":
-                print("    [!] Vẫn không thể phân loại. Đánh dấu video này là LỖI.")
-                groq_result["ai_status"] = "error"
-                groq_result["category"] = "Lỗi"
+                print("        [!] Final fallback to '🌍 Khác'")
+                # groq_result["ai_status"] = "error"
+                # groq_result["category"] = "Lỗi"
 
-        # ── BƯỚC 5: Phân nhánh theo loại video ──
+        # ── BƯỚC 4: Tính toán Metrics & Alignment ──
         is_upload = bool(video_data.get("storage_url", ""))
-
+        
         if is_upload:
             print("  [5/6] 📐 Extracting video metadata...")
             metadata = _extract_video_metadata(video_path)
@@ -1278,38 +1361,47 @@ def process_video(video_data: dict):
             benchmarks = _get_cached_benchmarks()
             score_result = _score_trend_alignment(groq_result, metadata, audio_text, benchmarks)
             
-            # Groq sinh nhận xét
-            insights = _generate_trend_insights(score_result, groq_result.get("summary", ""), metadata)
-            
+            # Tải báo cáo trend từ Model 2 và cải thiện điểm alignment
+            try:
+                from services.ai_engine.trend_analyzer import load_latest_trend_report, compute_trend_alignment_for_video
+                trend_report = load_latest_trend_report()
+                if trend_report:
+                    video_keywords = groq_result.get("keywords", [])
+                    video_category = groq_result.get("category", "")
+                    alignment2 = compute_trend_alignment_for_video(video_keywords, video_category, trend_report)
+                    
+                    # Kết hợp điểm hiện tại (từ score_result) với điểm từ Model 2 (trung bình)
+                    existing_val = score_result.get("trend_alignment_score", 0)
+                    existing = float(existing_val) if isinstance(existing_val, (int, float)) else 0.0
+                    combined = (existing + alignment2) / 2
+                    score_result["trend_alignment_score"] = round(combined, 1)  # type: ignore
+                    score_result["breakdown"]["trend_analyzer"] = {
+                        "score": alignment2,
+                        "weight": 50,
+                        "label": f"Phân tích xu hướng: {alignment2}đ"
+                    }
+            except Exception as e:
+                print(f"    [!] Error in Trend Alignment (Model 2): {e}")
+
+            # Generate insights
+            insights = _generate_trend_insights(score_result, groq_result, metadata)
+
             final = {
+                "video_id": video_id,
+                "category": [groq_result.get("category", "🌍 Khác")],
                 "video_description": groq_result.get("summary", ""),
-                "category": groq_result.get("category", "🌍 Khác"),
+                "top_keywords": ", ".join(groq_result.get("keywords", [])[:5]),
                 "video_sentiment": groq_result.get("sentiment", "🟡 TRUNG LẬP"),
                 "positive_score": groq_result.get("positive_score", 50.0),
-                "top_keywords": ", ".join(groq_result.get("keywords", [])[:5]),
                 "video_duration": metadata.get("duration", 0),
-                "video_orientation": metadata.get("orientation", "unknown"),
+                "video_orientation": metadata.get("orientation", "landscape"),
                 "scene_cut_count": metadata.get("scene_cut_count", 0),
                 "trend_alignment_score": score_result.get("trend_alignment_score", 0),
-                "trend_insights": {**score_result, **insights},
+                "trend_insights": insights,
                 "audio_transcript": audio_text,
-                "ai_status": groq_result.get("ai_status", "completed"),
+                "ai_status": "completed"
             }
-
             _update_supabase_upload(video_id, final)
-            _generate_embedding(video_id, audio_text, final.get("video_description", ""))
-
-            # Persist model cache vào Volume (cho lần cold start tiếp theo)
-            try:
-                model_volume.commit()
-            except Exception:
-                pass  # Bỏ qua nếu API thay đổi
-
-            print(f"\n  ✅ HOÀN THÀNH: {video_id}")
-            print(f"     🏷️ {final['category']} | Trend Alignment Score: {final['trend_alignment_score']}")
-
-            return {"status": "completed", "video_id": video_id}
-            
         else:
             print("  [5/5] 📊 Computing metrics & writing to Supabase...")
             metrics = _calculate_metrics(video_data)
@@ -1341,6 +1433,29 @@ def process_video(video_data: dict):
             print(f"     📊 VPH={metrics['vph']} | ER={metrics['er']}% | Velocity={metrics['velocity']}")
 
             return {"status": "completed", "video_id": video_id}
+
+    except Exception as e:
+        import traceback
+        print(f"\n❌ ERROR during processing {video_id}:")
+        traceback.print_exc()
+        
+        # Cập nhật DB status = 'error' để frontend ngừng polling
+        try:
+            from core.db.models import get_connection
+            db_url = os.environ.get("DATABASE_URL")
+            import psycopg2
+            conn = psycopg2.connect(db_url)
+            with conn.cursor() as cur:
+                # Cập nhật cả 2 bảng (videos cho engagement_based, video_analyses cho content_based)
+                cur.execute("UPDATE videos SET ai_status = 'error' WHERE video_id = %s", (video_id,))
+                cur.execute("UPDATE video_analyses SET ai_status = 'error' WHERE video_id = %s", (video_id,))
+                conn.commit()
+            conn.close()
+            print(f"    [✓] Database updated: {video_id} status set to 'error'")
+        except Exception as db_err:
+            print(f"    [!] Failed to update DB error status: {db_err}")
+
+        return {"status": "error", "video_id": video_id, "error": str(e)}
 
     finally:
         # Dọn dẹp video khỏi /tmp (Analyze & Destroy)

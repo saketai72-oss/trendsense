@@ -243,3 +243,35 @@ def categorize_video(video_id, caption):
     """
     categories = categorize_by_rules(caption)
     return _join_categories(categories)
+
+def categorize_multiple(text: str, max_cats: int = 3) -> list:
+    """
+    Phân loại văn bản (caption + description + keywords) thành danh sách danh mục.
+    Sử dụng rule-based từ khóa, trả về tối đa max_cats danh mục, sắp xếp theo điểm số.
+    Nếu không match danh mục nào, trả về ["🌍 Khác"].
+    """
+    if not text:
+        return ["🌍 Khác"]
+    
+    text_lower = text.lower()
+    # Tách từ đơn giản
+    tokens = set(text_lower.split())
+    # Thêm hashtag extraction nếu có
+    hashtags = extract_hashtags(text_lower)
+    all_tokens = tokens.union(hashtags)
+    
+    scored = []
+    for category, keywords in CATEGORIES.items():
+        score = sum(1 for kw in keywords if kw in all_tokens)
+        # Bonus substring
+        for kw in keywords:
+            if kw in text_lower and kw not in all_tokens:
+                score += 0.5
+        if score > 0:
+            scored.append((category, score))
+    
+    scored.sort(key=lambda x: x[1], reverse=True)
+    result = [cat for cat, _ in scored[:max_cats]]
+    if not result:
+        result = ["🌍 Khác"]
+    return result
