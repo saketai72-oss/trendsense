@@ -36,6 +36,8 @@ frontend/.next/
 .next/
 .env.local
 .qwen/
+.clinerules
+.clineignore
 
 scripts/
 debug_snapshots/    
