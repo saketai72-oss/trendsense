@@ -7,6 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 import time
 import random
 import requests
+import json
 from datetime import datetime
 
 try:
@@ -24,16 +25,193 @@ from services.tiktok_scraper.content_parser import extract_basic_stats
 
 
 
+STANDARD_CATEGORIES = [
+    "🎭 Giải trí", "🎵 Âm nhạc", "🍳 Ẩm thực", "💻 Công nghệ",
+    "👗 Thời trang", "📚 Giáo dục", "🏋️ Thể thao", "🐾 Động vật",
+    "💄 Làm đẹp", "📰 Tin tức", "💰 Tài chính",
+]
+
+OPENROUTER_FREE_MODELS = [
+    "google/gemini-2.5-flash:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "nvidia/llama-3.1-nemotron-70b-instruct:free",
+    "google/gemma-2-9b-it:free",
+    "mistralai/mistral-nemo:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "qwen/qwen-2.5-7b-instruct:free",
+    "microsoft/phi-3-mini-128k-instruct:free",
+    "meta-llama/llama-3-8b-instruct:free",
+]
+
+
+def _call_llm_json(prompt: str, system: str = "Bạn là AI phân tích xu hướng TikTok. Chỉ trả về JSON hợp lệ.") -> dict:
+    """
+    Gọi OpenRouter (10 free models) → Groq fallback.
+    Trả về dict JSON đã parse. Raise nếu tất cả đều thất bại.
+    """
+    import re
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
+
+    def _extract_json(text: str) -> dict:
+        start = text.find('{')
+        if start == -1:
+            raise ValueError("No JSON object found")
+        brace_count = 0
+        end = None
+        for i in range(start, len(text)):
+            if text[i] == '{':
+                brace_count += 1
+            elif text[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end = i
+                    break
+        if end is None:
+            raise ValueError("Unbalanced braces")
+        json_str = re.sub(r'\\u\{([0-9A-Fa-f]+)\}', lambda m: f"\\u{m.group(1).zfill(4)}", text[start:end+1])
+        return json.loads(json_str)
+
+    # 1. OpenRouter
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+    if openrouter_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1")
+            for model_name in OPENROUTER_FREE_MODELS:
+                try:
+                    resp = client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                        temperature=0.5,
+                        max_tokens=800,
+                    )
+                    content = resp.choices[0].message.content
+                    if content:
+                        result = _extract_json(content)
+                        print(f"  [🤖] OpenRouter ({model_name.split('/')[-1]}) → OK")
+                        return result
+                except Exception as e:
+                    print(f"  [~] OpenRouter {model_name.split('/')[-1]}: {str(e)[:60]}")
+                    continue
+        except Exception as e:
+            print(f"  [!] OpenRouter config error: {str(e)[:60]}")
+
+    # 2. Groq fallback
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if groq_key:
+        try:
+            from groq import Groq
+            groq_client = Groq(api_key=groq_key)
+            resp = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0.5,
+                max_tokens=800,
+            )
+            content = resp.choices[0].message.content
+            if content:
+                result = _extract_json(content)
+                print(f"  [🤖] Groq (llama-3.3-70b) → OK")
+                return result
+        except Exception as e:
+            print(f"  [!] Groq fallback error: {str(e)[:60]}")
+
+    raise RuntimeError("Tất cả LLM providers đều thất bại (OpenRouter + Groq)")
+
+
+def _fallback_llm_analysis(video_id, url, video_data, top_comments):
+    """
+    Phân tích video bằng OpenRouter/Groq (text-only, không cần video gốc).
+    Dùng khi Gemini Backend không khả dụng.
+    """
+    from services.ai_engine.math_utils import calculate_metrics
+
+    caption = video_data.get("caption", "")
+    views = video_data.get("views", 0)
+    likes = video_data.get("likes", 0)
+    comments_count = video_data.get("comments", 0)
+    shares = video_data.get("shares", 0)
+    saves = video_data.get("saves", 0)
+
+    prompt = f"""Phân tích video TikTok dựa trên các thông tin sau (không có nội dung video gốc):
+
+Caption: {caption}
+Top bình luận: {json.dumps([{"text": c.get("text", ""), "likes": c.get("likes_num", 0)} for c in (top_comments or [])[:5]], ensure_ascii=False)}
+Lượt xem: {views:,}, thích: {likes:,}, bình luận: {comments_count:,}, chia sẻ: {shares:,}, lưu: {saves:,}
+
+Hãy trả về JSON với các trường:
+- summary (string, tóm tắt ngắn ~20 từ, tiếng Việt)
+- category (string, chọn từ danh sách: {', '.join(STANDARD_CATEGORIES)})
+- sentiment (string, một trong "🟢 TÍCH CỰC", "🟡 TRUNG LẬP", "🔴 TIÊU CỰC")
+- positive_score (float, 0-100)
+- keywords (list of strings, 3-5 từ khóa tiếng Việt)
+- audio_transcript (string, để trống "")
+"""
+
+    try:
+        result = _call_llm_json(prompt)
+
+        # Validate category
+        cat = result.get("category", "🌍 Khác")
+        matched = "🌍 Khác"
+        for std in STANDARD_CATEGORIES:
+            if std.lower() == cat.lower() or (" " in std and std.split(" ", 1)[-1].lower() in cat.lower()):
+                matched = std
+                break
+
+        # Tính metrics
+        vph, er, velocity = calculate_metrics(
+            views=views, likes=likes, comments=comments_count,
+            shares=shares, saves=saves,
+            create_time=video_data.get("create_time", 0)
+        )
+
+        final_data = {
+            "video_description": result.get("summary", ""),
+            "category": matched,
+            "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
+            "positive_score": float(result.get("positive_score", 50.0)),
+            "top_keywords": ", ".join(result.get("keywords", [])[:5]),
+            "audio_transcript": result.get("audio_transcript", ""),
+            "ai_status": "completed",
+            "views_per_hour": vph,
+            "engagement_rate": er,
+            "viral_velocity": velocity,
+        }
+
+        from core.db.models import update_ai_results
+        update_ai_results(video_id, final_data)
+        print(f"  [✅] Fallback LLM thành công cho {video_id}")
+        return True
+
+    except Exception as e:
+        print(f"  [❌] Fallback LLM thất bại cho {video_id}: {str(e)[:80]}")
+        try:
+            from core.db.models import update_ai_results
+            update_ai_results(video_id, {
+                "video_description": f"Lỗi phân tích: {str(e)[:60]}",
+                "category": "Lỗi",
+                "video_sentiment": "🟡 TRUNG LẬP",
+                "positive_score": 50.0,
+                "ai_status": "error",
+            })
+        except Exception:
+            pass
+        return False
+
+
 def _trigger_ai_pipeline(video_id, url, video_data, top_comments):
     """
-    Gửi nhỏ giọt (drip-feed) từng video sang Backend (Gemini 1.5 Flash).
-    Nếu Backend chết hoặc lỗi hệ thống mạng (5xx), Fallback ngay sang Modal.
-    Backend (FastAPI) sẽ xử lý ngầm (Background Task) và tự lo Fallback nội bộ nếu Gemini API lỗi.
+    Gửi nhỏ giọt (drip-feed) từng video sang Backend (Gemini 2.5 Flash).
+    Nếu Backend chết hoặc lỗi hệ thống → Fallback sang OpenRouter/Groq (text-only).
+    Modal KHÔNG được sử dụng cho scraper — chỉ dành cho user upload.
     """
-    # URL của Gemini Backend Endpoint (local hoặc domain tùy cấu hình)
-    # Lấy từ ENV hoặc fallback về localhost
-    gemini_url = os.getenv("GEMINI_WEBHOOK_URL", "http://localhost:8000/api/analyze-gemini")
-    modal_url = settings.MODAL_WEBHOOK_URL
+    gemini_url = os.getenv("GEMINI_WEBHOOK_URL", "https://trendsense-sfj6.onrender.com/api/analyze-gemini")
 
     payload = {
         "video_id": video_id,
@@ -52,35 +230,22 @@ def _trigger_ai_pipeline(video_id, url, video_data, top_comments):
     }
 
     try:
-        # Gửi tới Gemini Backend trước (95% Primary)
         resp = requests.post(gemini_url, json=payload, timeout=5)
-        
+
         if resp.status_code == 202:
             print(f"  [🚀] Đã gửi sang Gemini AI Backend → Accepted")
             return
-            
+
         elif resp.status_code in [429, 500, 502, 503, 504]:
-            print(f"  [!] Gemini Backend báo lỗi hệ thống ({resp.status_code}). Đang Fallback sang Modal...")
+            print(f"  [!] Gemini Backend lỗi hệ thống ({resp.status_code}). Fallback sang OpenRouter/Groq...")
             raise RuntimeError("Backend Error")
         else:
-            print(f"  [!] Gemini Backend báo lỗi logic ({resp.status_code}): {resp.text[:80]}. KHÔNG Fallback.")
+            print(f"  [!] Gemini Backend lỗi logic ({resp.status_code}): {resp.text[:80]}. KHÔNG Fallback.")
             return
 
     except Exception as e:
-        # Lỗi mạng hoặc Backend chết hẳn -> Fallback sang Modal
-        print(f"  [⚠️] Kết nối Gemini Backend thất bại ({str(e)[:40]}). Kích hoạt Fallback sang Modal...")
-        if not modal_url:
-            print("  [!] Không có MODAL_WEBHOOK_URL để fallback.")
-            return
-            
-        try:
-            m_resp = requests.post(modal_url, json=payload, timeout=15)
-            if m_resp.status_code == 200:
-                print(f"  [🛡️] Đã gửi Fallback sang Modal AI thành công.")
-            else:
-                print(f"  [!] Modal Fallback lỗi HTTP {m_resp.status_code}: {m_resp.text[:80]}")
-        except Exception as me:
-            print(f"  [!] Lỗi cả Modal Fallback: {str(me)[:60]}")
+        print(f"  [⚠️] Gemini Backend không khả dụng ({str(e)[:40]}). Kích hoạt Fallback OpenRouter/Groq...")
+        _fallback_llm_analysis(video_id, url, video_data, top_comments)
 
 
 
@@ -143,22 +308,63 @@ def main():
     proxy = get_random_proxy()
     is_ci = _check_ci_environment(proxy)
 
-    driver = init_driver(proxy=proxy)
+    # ── Kiểm tra hàng đợi trước khi khởi động browser ──────────────────────
+    queue_file = os.path.join(os.path.dirname(__file__), "video_queue.json")
+    _pre_queue_links = []
+    _pre_queue_stats = {}
+    try:
+        if os.path.exists(queue_file):
+            with open(queue_file, "r", encoding="utf-8") as _f:
+                _qd = json.load(_f)
+            _pre_queue_links = _qd.get("links", [])
+            _pre_queue_stats = _qd.get("stats", {})
+    except Exception:
+        pass
 
-    # TĂNG TỶ LỆ VIDEO VIỆT NAM (Tránh lỗi do bắt IP quốc tế)
-    vn_tags = ["xuhuong", "xuhuongtiktok", "giaitri", "vietnam", "tintuc", "haihuoc"]
-    target_tag = random.choice(vn_tags)
-    url = f"https://www.tiktok.com/tag/{target_tag}"
+    queue_only_mode = len(_pre_queue_links) >= settings.MAX_VIDEOS
 
-    print(f"👉 Đang tải TikTok hashtag: #{target_tag}...")
-    if not _load_page_with_retry(driver, url):
-        driver.quit()
-        sys.exit(1)
+    if queue_only_mode:
+        print(f"\n[📦] Hàng đợi có {len(_pre_queue_links)} video (>= {settings.MAX_VIDEOS} mong muốn).")
+        print(f"[⚡] Bỏ qua bước scraping và không khởi động browser.\n")
+        driver = None
+    else:
+        driver = init_driver(proxy=proxy)
 
-    # 1. Thu thập POOL link dự phòng (gấp 3x target)
-    links, api_stats = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
+        # TĂNG TỶ LỆ VIDEO VIỆT NAM (Tránh lỗi do bắt IP quốc tế)
+        vn_tags = ["xuhuong", "xuhuongtiktok", "giaitri", "vietnam", "tintuc", "haihuoc"]
+        target_tag = random.choice(vn_tags)
+        url = f"https://www.tiktok.com/tag/{target_tag}"
+
+        print(f"👉 Đang tải TikTok hashtag: #{target_tag}...")
+        if not _load_page_with_retry(driver, url):
+            driver.quit()
+            sys.exit(1)
+
+
+    # 1. Resolve links & stats (dùng kết quả kiểm tra queue ở trên)
+    links = []
+    api_stats = {}
+
+    if queue_only_mode:
+        # Queue đủ — dùng toàn bộ từ queue, không scrape
+        links = _pre_queue_links
+        api_stats = _pre_queue_stats
+    else:
+        # Scrape mới và ghép queue cũ (nếu có) vào trước
+        fresh_links, fresh_stats = get_trending_links(driver, target_count=settings.MAX_VIDEOS)
+        if _pre_queue_links:
+            deduped_queue = [ql for ql in _pre_queue_links if ql not in fresh_links]
+            links = deduped_queue + fresh_links
+            api_stats = {**fresh_stats, **_pre_queue_stats}
+            if deduped_queue:
+                print(f"  [📥] Ghép {len(deduped_queue)} video từ queue + {len(fresh_links)} video mới.")
+        else:
+            links = fresh_links
+            api_stats = fresh_stats
+
     if api_stats:
-        print(f"  [📊] TikTokApi cung cấp stats cho {len(api_stats)} video (bỏ qua Selenium scrape)")
+        print(f"  [📊] Có stats cho {len(api_stats)} video từ TikTokApi/queue.")
+
 
     print("\n===== BẮT ĐẦU THU THẬP DỮ LIỆU =====\n")
     today = datetime.now().date().isoformat()
@@ -334,13 +540,36 @@ def main():
                 print(f"  [!] Thất bại khi lưu video {video_id} vào DB. Sẽ không đánh dấu history.")
 
 
-    # 4. Dọn dẹp
-    print("\n[*] Đang đóng trình duyệt...")
+    # 4. Dọn dẹp & Lưu Queue
+    if driver is not None:
+        print("\n[*] Đang đóng trình duyệt...")
+        try:
+            driver.quit()
+        except Exception:
+            pass  # Lỗi handle invalid trên Windows — không gây hại
+        
+    # Xử lý hàng đợi sau khi chạy xong
     try:
-        driver.quit()
+        # Tính index dừng: nếu đủ target thì dừng tại i-1, không thì đã chạy hết links
+        last_processed = (i - 1) if saved_count >= target else i
+        remaining_links = links[last_processed:]
+
+        if remaining_links:
+            # Còn link chưa xử lý → lưu vào queue cho lần sau
+            queue_stats = {lnk: api_stats[lnk] for lnk in remaining_links if lnk in api_stats}
+            with open(queue_file, "w", encoding="utf-8") as f:
+                json.dump({"links": remaining_links, "stats": queue_stats}, f, ensure_ascii=False, indent=2)
+            print(f"\n[💾] Lưu {len(remaining_links)} video thừa vào hàng đợi cho lần chạy sau.")
+        else:
+            # Không còn gì thừa → xóa queue cũ (nếu có)
+            if os.path.exists(queue_file):
+                os.remove(queue_file)
+                print(f"\n[🗑️] Đã xóa hàng đợi (đã dùng hết).")
+            else:
+                print(f"\n[✓] Không có hàng đợi để xóa.")
     except Exception as e:
-        # Lỗi handle invalid trên Windows thường không gây hại, ta có thể bỏ qua
-        pass
+        print(f"  [!] Lỗi khi cập nhật video_queue.json: {e}")
+
 
     # 5. Báo cáo kết quả
     print(f"\n{'=' * 50}")
