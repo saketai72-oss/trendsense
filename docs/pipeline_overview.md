@@ -79,7 +79,7 @@ Dữ liệu đầu vào đến từ 2 nguồn chính:
 - **Lưu DB:** `insert_video_metadata()` → bảng `videos` với `ai_status = 'pending'`, đồng thời `mark_as_scraped()` vào bảng `history`.
 - **Kích hoạt AI:** `_trigger_ai_pipeline()`:
   - **Primary:** `POST` đến `GEMINI_WEBHOOK_URL` (mặc định `http://localhost:8000/api/analyze-gemini`). Nếu nhận 202 → OK.
-  - **Fallback:** Nếu backend trả 429/5xx hoặc không reachable → `POST` đến `MODAL_WEBHOOK_URL` (Modal GPU).
+  - **Fallback:** Nếu backend trả 429/5xx hoặc không reachable → `_fallback_llm_analysis()` phân tích trực tiếp bằng OpenRouter (10 free models) / Groq (text-only, không cần video gốc). **Modal KHÔNG được sử dụng cho scraper** — chỉ dành cho user upload.
 
 ### B. User Uploads — Tải lên chủ động
 - **Endpoint:** `GET /api/upload-url` và `POST /api/analyze` (`backend/api/routes.py`)
@@ -391,7 +391,7 @@ To avoid IP blocking, all automated scraping and retraining have been moved to l
 | `MAX_VIDEOS` | 30 | Số video tối đa mỗi lần scrape |
 | `SLIDING_WINDOW_DAYS` | 14 | Cửa sổ dữ liệu cho train/predict |
 | `DOWNLOAD_VIDEOS` | True | Có tải video về không |
-| `VIDEO_RETENTION_DAYS` | 14 | Tuổi tối đa video trước khi cleanup |
+| `VIDEO_RETENTION_DAYS` | 30 | Tuổi tối đa video trước khi cleanup |
 | `MAX_VIDEO_SIZE_MB` | 15 | Kích thước tối đa khi download |
 | `MAX_VIDEO_DURATION` | 180 | Thời lượng tối đa (giây) |
 | `ZERO_SHOT_MODEL` | `MoritzLaurer/mDeBERTa-v3-base-mnli-xnli` | Zero-shot classification |
@@ -541,10 +541,11 @@ Local Scheduler (mỗi 4h)
               → update_ai_results() → Supabase (ai_status=completed)
               → embedding_service → gemini-embedding-001 (3072-dim) → pgvector (non-blocking)
               → cleanup Gemini file
-              [Nếu fail] → _trigger_modal_fallback()
-      [Fallback] POST MODAL_WEBHOOK_URL
-          → Modal GPU Worker (T4/L4):
-              → Whisper + BLIP + EasyOCR → OpenRouter/Groq LLM → DB
+              [Nếu fail] → _fallback_to_llm() (OpenRouter/Groq text-only)
+      [Fallback — Backend không khả dụng] _fallback_llm_analysis():
+          → OpenRouter (10 free models) → Groq fallback
+          → Text-only phân tích (caption + stats) → JSON
+          → calculate_metrics() → update_ai_results() → Supabase
   → Next.js Dashboard hiển thị
 ```
 
