@@ -410,16 +410,13 @@ TRẢ VỀ JSON (BẮT BUỘC):
             client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1")
             
             openrouter_free_models = [
-                "google/gemini-2.5-flash:free",
                 "meta-llama/llama-3.3-70b-instruct:free",
-                "nvidia/llama-3.1-nemotron-70b-instruct:free",
-                "google/gemma-2-9b-it:free",
-                "mistralai/mistral-nemo:free",
-                "meta-llama/llama-3.1-8b-instruct:free",
-                "qwen/qwen-2.5-72b-instruct:free",
-                "qwen/qwen-2.5-7b-instruct:free",
-                "microsoft/phi-3-mini-128k-instruct:free",
-                "meta-llama/llama-3-8b-instruct:free"
+                "google/gemma-4-31b-it:free",
+                "deepseek/deepseek-v4-flash:free",
+                "qwen/qwen3-next-80b-a3b-instruct:free",
+                "openai/gpt-oss-120b:free",
+                "nvidia/nemotron-3-super-120b-a12b:free",
+                "openrouter/free"
             ]
 
             for selected_model in openrouter_free_models:

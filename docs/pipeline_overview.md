@@ -143,7 +143,7 @@ Hai luồng xử lý song song, ưu tiên theo thứ tự:
 
 **LLM fallback chain trong Modal (`_call_groq()`):**
 1. **OpenRouter** (primary, thử 10 free models, mỗi model 2 attempts):
-   - `google/gemini-2.5-flash:free` → `meta-llama/llama-3.3-70b-instruct:free` → `nvidia/llama-3.1-nemotron-70b-instruct:free` → `google/gemma-2-9b-it:free` → `mistralai/mistral-nemo:free` → `meta-llama/llama-3.1-8b-instruct:free` → `qwen/qwen-2.5-72b-instruct:free` → `qwen/qwen-2.5-7b-instruct:free` → `microsoft/phi-3-mini-128k-instruct:free` → `meta-llama/llama-3-8b-instruct:free`
+   - `meta-llama/llama-3.3-70b-instruct:free` → `google/gemma-4-31b-it:free` → `deepseek/deepseek-v4-flash:free` → `qwen/qwen3-next-80b-a3b-instruct:free` → `openai/gpt-oss-120b:free` → `nvidia/nemotron-3-super-120b-a12b:free` → `openrouter/free`
 2. **Groq** (fallback, 4 models, 4 attempts với backoff):
    - `llama-3.3-70b-versatile` → `llama-3.1-8b-instant` → `llama3-8b-8192`
 
@@ -378,7 +378,7 @@ To avoid IP blocking, all automated scraping and retraining have been moved to l
 | `SUPABASE_SERVICE_KEY` | `""` | Service key để bypass RLS (chỉ dùng backend) |
 | `SUPABASE_BUCKET` | `"videos"` | Tên bucket Storage |
 | `OPENROUTER_API_KEY` | `""` | API Key chính cho text generation (10 free models) |
-| `OPENROUTER_DEFAULT_MODEL` | `meta-llama/llama-3.3-70b-instruct:free` | Default model (dùng khi chỉ định cụ thể) |
+| `OPENROUTER_DEFAULT_MODEL` | `openrouter/free` | Default model (dùng khi chỉ định cụ thể) |
 | `GROQ_API_KEY` | `""` | Fallback text generation API |
 | `GEMINI_API_KEY` | `""` | Video analysis (Gemini 2.5 Flash) + Semantic Embeddings (gemini-embedding-001, 3072-dim) |
 | `MODAL_WEBHOOK_URL` | `""` | URL webhook Modal GPU endpoint |

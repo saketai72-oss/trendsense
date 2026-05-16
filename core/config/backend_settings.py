@@ -27,7 +27,7 @@ SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "videos")
 # ── OpenRouter (Primary LLM) + Groq (Fallback) ────────
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_DEFAULT_MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+OPENROUTER_DEFAULT_MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "openrouter/free")
 
 # ── Authentication (JWT) ──────────────────────────────
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-production-use-openssl-rand-hex-32")
