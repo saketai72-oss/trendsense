@@ -162,7 +162,6 @@ def init_db():
                 'CREATE INDEX IF NOT EXISTS idx_video_analyses_video ON video_analyses(video_id)',
                 'CREATE INDEX IF NOT EXISTS idx_video_analyses_user ON video_analyses(user_id)',
                 'CREATE INDEX IF NOT EXISTS idx_video_analyses_status ON video_analyses(ai_status)',
-                'CREATE INDEX IF NOT EXISTS idx_videos_user ON videos(user_id)',
                 'CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)',
                 'CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)',
                 'CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id)',
