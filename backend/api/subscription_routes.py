@@ -7,16 +7,13 @@ Endpoints:
   GET  /api/subscription/check-payment/{ref} — poll trạng thái payment
   POST /api/webhook/sepay                 — webhook từ SePay (tự động kích hoạt Pro)
 """
-import hashlib
-import hmac
 import logging
 import os
 import time
 
 import requests as http_requests
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from typing import Optional
 
 from backend.auth.dependencies import get_current_user
 from core.db.models import (
@@ -232,49 +229,60 @@ def payment_history(user: dict = Depends(get_current_user)):
 @router.post("/webhook/sepay", status_code=200)
 async def sepay_webhook(request: Request):
     """
-    Nhận webhook từ SePay khi có giao dịch khớp tài khoản MB Bank.
-    SePay gửi POST với body JSON chứa thông tin giao dịch.
-    Xác thực bằng HMAC-SHA256 signature trong header X-Sepay-Signature.
+    Nhận webhook từ SePay khi có giao dịch vào tài khoản MB Bank.
 
-    Docs: https://docs.sepay.vn/webhook
+    Xác thực: SePay gửi API key qua header 'Authorization: Apikey {key}'
+    (KHÔNG phải HMAC-SHA256 — đây là cách SePay hoạt động theo docs chính thức)
+
+    Docs: https://docs.sepay.vn/tich-hop-webhook
     """
-    body_bytes = await request.body()
-
-    # Xác thực chữ ký SePay (bỏ qua nếu chưa có secret — chỉ trong dev)
+    # ── Xác thực Apikey ───────────────────────────────────────────────────────
     if SEPAY_WEBHOOK_SECRET:
-        signature = request.headers.get("X-Sepay-Signature", "")
-        mac = hmac.new(
-            SEPAY_WEBHOOK_SECRET.encode(),
-            body_bytes,
-            hashlib.sha256,
-        )
-        expected = mac.hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            logger.warning("[SePay] Webhook signature không khớp!")
-            raise HTTPException(status_code=401, detail="Invalid signature")
+        auth_header = request.headers.get("Authorization", "")
+        # SePay gửi: "Authorization: Apikey <your_api_key>"
+        expected_auth = f"Apikey {SEPAY_WEBHOOK_SECRET}"
+        if auth_header != expected_auth:
+            logger.warning(
+                f"[SePay] Auth header không khớp. Nhận: '{auth_header[:30]}...'"
+            )
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
+    # ── Parse JSON body ────────────────────────────────────────────────────────
     try:
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    # SePay webhook format:
-    # { "id": "...", "gateway": "MB Bank", "transactionDate": "...",
-    #   "accountNumber": "...", "code": "TSPRO...",  ← nội dung CK
-    #   "content": "TSPRO...", "transferType": "in",
-    #   "transferAmount": 49000, "referenceCode": "...", ... }
+    logger.info(f"[SePay] Webhook nhận được: {str(data)[:200]}")
+
+    # ── SePay webhook payload format ──────────────────────────────────────────
+    # {
+    #   "id": 1234,
+    #   "gateway": "MB Bank",
+    #   "transactionDate": "2024-01-01 12:00:00",
+    #   "accountNumber": "0123456789",
+    #   "subAccount": null,
+    #   "code": "TSPRO...",          ← nội dung chuyển khoản (field chính)
+    #   "content": "TSPRO...",       ← alias của code
+    #   "transferType": "in",        ← "in" = tiền vào, "out" = tiền ra
+    #   "description": "...",
+    #   "transferAmount": 49000,
+    #   "referenceCode": "...",      ← mã tham chiếu ngân hàng
+    #   "accumulated": 49000,
+    #   "id": "..."
+    # }
 
     transfer_type = data.get("transferType", "")
     if transfer_type != "in":
-        # Chỉ xử lý giao dịch tiền vào
-        return {"status": "ignored", "reason": "not_incoming"}
+        return {"success": True, "message": "Bỏ qua: không phải giao dịch tiền vào"}
 
-    content: str = data.get("content", "") or data.get("code", "")
-    transaction_id: str = str(data.get("id", "") or data.get("referenceCode", ""))
+    # SePay dùng "code" hoặc "content" cho nội dung chuyển khoản
+    content: str = (data.get("content") or data.get("code") or "").strip()
+    transaction_id: str = str(data.get("id", "") or "")
     amount: int = int(data.get("transferAmount", 0))
 
-    # Tìm reference_code trong nội dung chuyển khoản
-    # Nội dung có thể là "TSPRO ABC123 716042" hoặc "TSPRO ABC123716042"
+    # ── Tìm reference_code trong nội dung CK ──────────────────────────────────
+    # VD: "TSPRO ABC123 716042" hoặc "TSPRO ABC123716042" hoặc "chuyen khoan TSPRO..."
     reference_code = None
     for token in content.upper().split():
         if token.startswith("TSPRO") and len(token) >= 11:
@@ -282,29 +290,33 @@ async def sepay_webhook(request: Request):
             break
 
     if not reference_code:
-        logger.info(f"[SePay] Giao dịch {transaction_id} không khớp reference. Content: {content[:50]}")
-        return {"status": "ignored", "reason": "no_reference_code"}
+        logger.info(
+            f"[SePay] Giao dịch {transaction_id}: không tìm thấy TSPRO trong '{content[:60]}'"
+        )
+        return {"success": True, "message": "Bỏ qua: không tìm thấy reference code"}
 
-    # Lấy payment record
+    # ── Đối soát payment trong DB ──────────────────────────────────────────────
     payment = get_payment_by_reference(reference_code)
     if not payment:
-        logger.warning(f"[SePay] reference_code {reference_code} không tồn tại trong DB")
-        return {"status": "ignored", "reason": "reference_not_found"}
+        logger.warning(f"[SePay] reference_code '{reference_code}' không tồn tại trong DB")
+        return {"success": True, "message": "Bỏ qua: reference không tìm thấy"}
 
-    # Kiểm tra số tiền (±1000 VND để tránh lỗi làm tròn)
+    # ── Kiểm tra số tiền (±1000 VND buffer) ────────────────────────────────────
     expected_amount = PLAN_PRICES.get(payment["plan"], 0)
     if abs(amount - expected_amount) > 1000:
         logger.warning(
-            f"[SePay] Số tiền không khớp: nhận {amount}, mong đợi {expected_amount} "
+            f"[SePay] Số tiền không khớp: nhận {amount:,}, mong đợi {expected_amount:,} "
             f"(ref: {reference_code})"
         )
-        return {"status": "ignored", "reason": "amount_mismatch"}
+        return {"success": True, "message": f"Bỏ qua: số tiền không khớp ({amount} vs {expected_amount})"}
 
-    # Kích hoạt subscription
+    # ── Kích hoạt subscription ─────────────────────────────────────────────────
     success = complete_payment(reference_code, transaction_id)
     if success:
-        logger.info(f"[SePay] ✅ Kích hoạt Pro thành công: ref={reference_code}, tx={transaction_id}")
-        return {"status": "ok", "message": "Subscription activated"}
+        logger.info(
+            f"[SePay] ✅ Pro kích hoạt: ref={reference_code}, amount={amount:,}, tx={transaction_id}"
+        )
+        return {"success": True, "message": "Subscription activated successfully"}
     else:
         logger.error(f"[SePay] ❌ complete_payment thất bại: ref={reference_code}")
-        raise HTTPException(status_code=500, detail="Không thể kích hoạt subscription")
+        raise HTTPException(status_code=500, detail="Lỗi kích hoạt subscription")
