@@ -111,6 +111,45 @@ def init_db():
                 )
             ''')
 
+            # ── Subscriptions table (gói đăng ký) ──
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    plan VARCHAR(20) NOT NULL DEFAULT 'free',
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    started_at TIMESTAMPTZ DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE (user_id)
+                )
+            ''')
+
+            # ── Daily usage table (quota hàng ngày) ──
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS daily_usage (
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                    videos_analyzed INTEGER DEFAULT 0,
+                    PRIMARY KEY (user_id, usage_date)
+                )
+            ''')
+
+            # ── Payments table (lịch sử giao dịch) ──
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS payments (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    amount INTEGER NOT NULL,
+                    plan VARCHAR(20) NOT NULL,
+                    status VARCHAR(20) DEFAULT 'pending',
+                    reference_code VARCHAR(100) UNIQUE NOT NULL,
+                    transaction_id VARCHAR(255),
+                    paid_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            ''')
+
             # Indexes
             for idx_sql in [
                 'CREATE INDEX IF NOT EXISTS idx_ai_status ON videos(ai_status)',
@@ -124,6 +163,12 @@ def init_db():
                 'CREATE INDEX IF NOT EXISTS idx_video_analyses_user ON video_analyses(user_id)',
                 'CREATE INDEX IF NOT EXISTS idx_video_analyses_status ON video_analyses(ai_status)',
                 'CREATE INDEX IF NOT EXISTS idx_videos_user ON videos(user_id)',
+                'CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)',
+                'CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)',
+                'CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id)',
+                'CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(reference_code)',
+                'CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)',
+                'CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON daily_usage(usage_date)',
             ]:
                 try:
                     cursor.execute(idx_sql)
@@ -1104,5 +1149,206 @@ def delete_user_video(video_id: str, user_id: str) -> bool:
     except Exception:
         conn.rollback()
         return False
+    finally:
+        conn.close()
+
+
+# ==========================================
+# PAYMENT & SUBSCRIPTION LOGIC
+# ==========================================
+
+PLAN_QUOTAS: dict[str, int] = {
+    "free": 2,
+    "pro_49k": 10,
+}
+
+
+def get_user_subscription(user_id: str) -> dict:
+    """
+    Lấy thông tin gói hiện tại của user.
+    Nếu chưa có bản ghi → mặc định trả về free.
+    Tự động kiểm tra hết hạn và downgrade về free.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT plan, status, started_at, expires_at
+                FROM subscriptions
+                WHERE user_id = %s
+            """, (user_id,))
+            row = cur.fetchone()
+
+            if not row:
+                return {"plan": "free", "status": "active", "expires_at": None}
+
+            sub = dict(row)
+
+            # Tự động downgrade nếu hết hạn
+            if (
+                sub["plan"] != "free"
+                and sub["expires_at"]
+                and sub["expires_at"] < datetime.now(sub["expires_at"].tzinfo)
+            ):
+                cur.execute("""
+                    UPDATE subscriptions
+                    SET plan = 'free', status = 'active', expires_at = NULL
+                    WHERE user_id = %s
+                """, (user_id,))
+                conn.commit()
+                sub["plan"] = "free"
+                sub["status"] = "active"
+                sub["expires_at"] = None
+
+            return sub
+    finally:
+        conn.close()
+
+
+def get_daily_usage(user_id: str) -> int:
+    """Số video đã phân tích hôm nay (reset lúc 00:00 GMT+7)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT videos_analyzed FROM daily_usage
+                WHERE user_id = %s AND usage_date = CURRENT_DATE AT TIME ZONE 'Asia/Ho_Chi_Minh'
+            """, (user_id,))
+            row = cur.fetchone()
+            return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def increment_daily_usage(user_id: str) -> int:
+    """Tăng counter sử dụng hôm nay lên 1. Trả về giá trị mới."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO daily_usage (user_id, usage_date, videos_analyzed)
+                VALUES (%s, CURRENT_DATE AT TIME ZONE 'Asia/Ho_Chi_Minh', 1)
+                ON CONFLICT (user_id, usage_date)
+                DO UPDATE SET videos_analyzed = daily_usage.videos_analyzed + 1
+                RETURNING videos_analyzed
+            """, (user_id,))
+            row = cur.fetchone()
+            conn.commit()
+            return row[0] if row else 1
+    except Exception as e:
+        conn.rollback()
+        print(f"[ERROR] increment_daily_usage {user_id}: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
+def check_video_quota(user_id: str) -> tuple[bool, int, int]:
+    """
+    Kiểm tra user còn quota phân tích video hôm nay không.
+    Returns: (allowed, used, limit)
+    """
+    sub = get_user_subscription(user_id)
+    plan = sub.get("plan", "free")
+    limit = PLAN_QUOTAS.get(plan, PLAN_QUOTAS["free"])
+    used = get_daily_usage(user_id)
+    return used < limit, used, limit
+
+
+def create_payment(user_id: str, amount: int, plan: str, reference_code: str) -> dict:
+    """Tạo bản ghi payment mới trạng thái pending."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                INSERT INTO payments (user_id, amount, plan, status, reference_code)
+                VALUES (%s, %s, %s, 'pending', %s)
+                RETURNING id, reference_code, created_at
+            """, (user_id, amount, plan, reference_code))
+            row = cur.fetchone()
+            conn.commit()
+            return dict(row)
+    except Exception as e:
+        conn.rollback()
+        print(f"[ERROR] create_payment {user_id}: {e}")
+        raise
+    finally:
+        conn.close()
+
+
+def get_payment_by_reference(reference_code: str) -> dict | None:
+    """Lấy payment record theo reference_code (để SePay webhook đối soát)."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, user_id, amount, plan, status, reference_code, transaction_id, paid_at
+                FROM payments WHERE reference_code = %s
+            """, (reference_code,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def complete_payment(reference_code: str, transaction_id: str) -> bool:
+    """
+    Đánh dấu payment đã thanh toán xong và kích hoạt gói Pro.
+    Được gọi bởi SePay webhook handler.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Lấy thông tin payment
+            cur.execute("""
+                SELECT id, user_id, plan, status FROM payments
+                WHERE reference_code = %s
+            """, (reference_code,))
+            payment = cur.fetchone()
+
+            if not payment:
+                return False
+            if payment["status"] == "completed":
+                return True  # Idempotent — đã xử lý rồi
+
+            # Cập nhật payment
+            cur.execute("""
+                UPDATE payments
+                SET status = 'completed', transaction_id = %s, paid_at = NOW()
+                WHERE reference_code = %s
+            """, (transaction_id, reference_code))
+
+            # Kích hoạt subscription 30 ngày
+            cur.execute("""
+                INSERT INTO subscriptions (user_id, plan, status, started_at, expires_at)
+                VALUES (%s, %s, 'active', NOW(), NOW() + INTERVAL '30 days')
+                ON CONFLICT (user_id) DO UPDATE SET
+                    plan = EXCLUDED.plan,
+                    status = 'active',
+                    started_at = NOW(),
+                    expires_at = NOW() + INTERVAL '30 days'
+            """, (str(payment["user_id"]), payment["plan"]))
+
+            conn.commit()
+            return True
+    except Exception as e:
+        conn.rollback()
+        print(f"[ERROR] complete_payment {reference_code}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_payment_history(user_id: str, limit: int = 10) -> list:
+    """Lấy lịch sử thanh toán của user."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, amount, plan, status, reference_code, paid_at, created_at
+                FROM payments WHERE user_id = %s
+                ORDER BY created_at DESC LIMIT %s
+            """, (user_id, limit))
+            return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()

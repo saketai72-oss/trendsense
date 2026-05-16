@@ -192,3 +192,24 @@ export async function authLogout(refreshToken) {
 export async function authGetMe() {
   return fetcher("/auth/me");
 }
+
+// ── Subscription / Payment API ────────────────────────────────────────────────
+
+export async function getSubscriptionStatus() {
+  return fetcher("/subscription/status");
+}
+
+export async function createPayment(plan = "pro_49k") {
+  return fetcher("/subscription/create-payment", {
+    method: "POST",
+    body: JSON.stringify({ plan }),
+  });
+}
+
+export async function checkPaymentStatus(referenceCode) {
+  return fetcher(`/subscription/check-payment/${referenceCode}`);
+}
+
+export async function getPaymentHistory() {
+  return fetcher("/subscription/history");
+}

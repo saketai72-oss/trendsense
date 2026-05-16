@@ -2,12 +2,14 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "../lib/AuthContext";
+import { getSubscriptionStatus } from "../lib/api";
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const { user, isAuthenticated, logout } = useAuth();
   const menuRef = useRef(null);
+  const [isPro, setIsPro] = useState(false);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -24,7 +26,16 @@ export default function Navbar() {
     await logout();
     setMenuOpen(false);
     setIsOpen(false);
+    setIsPro(false);
   };
+
+  // Load subscription status
+  useEffect(() => {
+    if (!isAuthenticated) { setIsPro(false); return; }
+    getSubscriptionStatus()
+      .then((d) => setIsPro(d?.plan === "pro_49k"))
+      .catch(() => {});
+  }, [isAuthenticated]);
 
   const userInitial = user?.display_name?.[0] || user?.email?.[0]?.toUpperCase() || "?";
 
@@ -92,9 +103,20 @@ export default function Navbar() {
                     style={{ background: "var(--gradient-primary)", color: "white" }}>
                     {userInitial}
                   </div>
-                  <span className="text-sm font-medium max-w-[120px] truncate" style={{ color: "var(--text-primary)" }}>
+                  <span className="text-sm font-medium max-w-[100px] truncate" style={{ color: "var(--text-primary)" }}>
                     {user?.display_name || user?.email?.split("@")[0]}
                   </span>
+                  {isPro && (
+                    <span style={{
+                      padding: "2px 7px",
+                      borderRadius: 99,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: "rgba(245,158,11,0.18)",
+                      color: "#f59e0b",
+                      border: "1px solid rgba(245,158,11,0.3)",
+                    }}>⭐ Pro</span>
+                  )}
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                     style={{ color: "var(--text-muted)", transform: menuOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
                     <polyline points="6 9 12 15 18 9" />
@@ -129,6 +151,15 @@ export default function Navbar() {
                         onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}>
                         🎬 Phân tích video
                       </Link>
+                      {!isPro && (
+                        <Link href="/upgrade" onClick={() => setMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm no-underline transition-colors"
+                          style={{ color: "#f59e0b", fontWeight: 600 }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(245,158,11,0.08)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+                          ⭐ Nâng cấp Pro
+                        </Link>
+                      )}
                       <button onClick={handleLogout}
                         className="flex items-center gap-3 px-4 py-2.5 text-sm w-full text-left transition-colors cursor-pointer"
                         style={{ color: "var(--accent-red)", background: "transparent", border: "none" }}

@@ -25,6 +25,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from backend.api.routes import router
 from backend.auth.routes import router as auth_router
+from backend.api.subscription_routes import router as subscription_router
 from core.config.backend_settings import FRONTEND_URL, REDIS_URL
 
 from backend.api.rate_limiter import limiter
@@ -124,6 +125,7 @@ app.add_middleware(RequestIDMiddleware)
 # Mount API routes
 app.include_router(router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(subscription_router, prefix="/api")
 
 
 @app.get("/")

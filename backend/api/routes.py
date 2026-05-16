@@ -229,6 +229,21 @@ def analyze_video(request: Request, body: AnalyzeRequest, user: dict = Depends(g
 
     user_id = str(user["id"])
 
+    # ── Kiểm tra quota hàng ngày ──
+    from core.db.models import check_video_quota, increment_daily_usage
+    allowed, used, limit = check_video_quota(user_id)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "QUOTA_EXCEEDED",
+                "message": f"Bạn đã dùng hết {limit}/{limit} lượt phân tích video hôm nay.",
+                "used": used,
+                "limit": limit,
+                "upgrade_url": "/upgrade",
+            },
+        )
+
     # Insert into video_analyses (user uploads only)
     try:
         insert_user_upload_analysis(video_id, storage_path, user_id, body.caption or "")
@@ -252,10 +267,13 @@ def analyze_video(request: Request, body: AnalyzeRequest, user: dict = Depends(g
     try:
         resp = http_requests.post(MODAL_WEBHOOK_URL, json=payload, timeout=30)
         resp.raise_for_status()
+        # Tăng quota SAU khi dispatch thành công
+        increment_daily_usage(user_id)
         return {
             "status": "queued",
             "video_id": video_id,
             "message": f"Video đang được AI phân tích. Vui lòng chờ 1-3 phút.",
+            "quota": {"used": used + 1, "limit": limit},
         }
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Lỗi kết nối Modal: {str(e)[:200]}")
