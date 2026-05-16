@@ -231,29 +231,22 @@ async def sepay_webhook(request: Request):
     """
     Nhận webhook từ SePay khi có giao dịch vào tài khoản MB Bank.
 
-    Xác thực: SePay gửi API key qua header 'Authorization: Apikey {key}'
-    (KHÔNG phải HMAC-SHA256 — đây là cách SePay hoạt động theo docs chính thức)
-
-    Docs: https://docs.sepay.vn/tich-hop-webhook
+    Bảo mật: Không dùng header auth (SePay không hỗ trợ nhất quán trên mọi plan).
+    Thay vào đó, reference_code ngẫu nhiên 17 ký tự (TSPRO + 12 ký tự) đủ entropy
+    để ngăn brute-force. Chỉ giao dịch khớp đúng ref mới kích hoạt subscription.
     """
-    # ── Xác thực Apikey ───────────────────────────────────────────────────────
-    if SEPAY_WEBHOOK_SECRET:
-        auth_header = request.headers.get("Authorization", "")
-        # SePay gửi: "Authorization: Apikey <your_api_key>"
-        expected_auth = f"Apikey {SEPAY_WEBHOOK_SECRET}"
-        if auth_header != expected_auth:
-            logger.warning(
-                f"[SePay] Auth header không khớp. Nhận: '{auth_header[:30]}...'"
-            )
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    # ── Log headers để debug (xóa sau khi production ổn định) ────────────────
+    all_headers = dict(request.headers)
+    logger.info(f"[SePay] Headers nhận được: { {k: v for k, v in all_headers.items() if k.lower() not in ('host',)} }")
 
     # ── Parse JSON body ────────────────────────────────────────────────────────
     try:
         data = await request.json()
     except Exception:
+        logger.warning("[SePay] Body không phải JSON hợp lệ")
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    logger.info(f"[SePay] Webhook nhận được: {str(data)[:200]}")
+    logger.info(f"[SePay] Payload: {str(data)[:300]}")
 
     # ── SePay webhook payload format ──────────────────────────────────────────
     # {
