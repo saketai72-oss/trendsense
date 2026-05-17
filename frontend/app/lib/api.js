@@ -4,7 +4,7 @@
  * Attaches JWT access token to authenticated requests.
  */
 
-// Relative path — Next.js proxies /api/* → http://localhost:8000/api/* via next.config.mjs rewrites.
+// Relative path — Next.js proxies /api/* → https://trendsense-sfj6.onrender.com/api/* via next.config.mjs rewrites.
 const API_BASE = "/api";
 
 function getStoredToken() {
@@ -95,8 +95,14 @@ async function fetcher(path, options = {}, retryOn401 = true) {
   }
 
   if (!res.ok) {
+    // Detect Next.js proxy ECONNREFUSED which returns a 500 HTML page
+    const isHtml = res.headers.get("content-type")?.includes("text/html");
+    if (isHtml && res.status === 500) {
+      throw new Error("Cannot connect to backend server. Please ensure the backend is running.");
+    }
+    
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `API error: ${res.status}`);
+    throw new Error(err.detail || `API error: ${res.status} ${res.statusText}`);
   }
   return res.json();
 }
