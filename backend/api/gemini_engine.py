@@ -37,6 +37,17 @@ def _delete_gemini_file(file_name):
     except Exception as e:
         logger.error(f"Lỗi khi xoá file trên Gemini {file_name}: {e}")
 
+def _normalize_sentiment(sentiment: str) -> str:
+    if not sentiment:
+        return "🟡 TRUNG LẬP"
+    s = sentiment.lower()
+    if any(term in s for term in ["tích cực", "positive", "vui", "tốt"]):
+        return "🟢 TÍCH CỰC"
+    elif any(term in s for term in ["tiêu cực", "negative", "buồn", "xấu"]):
+        return "🔴 TIÊU CỰC"
+    else:
+        return "🟡 TRUNG LẬP"
+
 def _fallback_to_llm(video_data: dict) -> bool:
     """Fallback sử dụng OpenRouter/Groq (text‑only) cho scraper videos.
        Trả về True nếu thành công, False nếu thất bại."""
@@ -88,7 +99,7 @@ Hãy trả về JSON với các trường:
         final_data = {
             "video_description": result.get("summary", ""),
             "category": matched,
-            "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
+            "video_sentiment": _normalize_sentiment(result.get("sentiment", "🟡 TRUNG LẬP")),
             "positive_score": float(result.get("positive_score", 50.0)),
             "top_keywords": ", ".join(result.get("keywords", [])[:5]),
             "audio_transcript": result.get("audio_transcript", ""),
@@ -279,7 +290,7 @@ BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON.
         final_data = {
             "video_description": result.get("summary", result.get("video_description", "")),
             "category": matched if not video_id.startswith("upload_") else ([matched] if isinstance(matched, str) else matched),
-            "video_sentiment": result.get("sentiment", "🟡 TRUNG LẬP"),
+            "video_sentiment": _normalize_sentiment(result.get("sentiment", "🟡 TRUNG LẬP")),
             "positive_score": result.get("positive_score", 50.0),
             "top_keywords": ", ".join(result.get("keywords", [])[:5]) if "keywords" in result else result.get("top_keywords", ""),
             "audio_transcript": result.get("audio_transcript", ""),

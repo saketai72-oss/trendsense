@@ -33,7 +33,7 @@ def process_video_item(video_data):
     )
 
     # 2. Phân tích Sentiment & Keywords
-    sentiment = "⚪ KHÔNG CÓ BÌNH LUẬN"
+    sentiment = "🟡 TRUNG LẬP"
     positive_score = 0.0
     comments_to_analyze = []
     all_text_for_keywords = clean_text(str(caption))
