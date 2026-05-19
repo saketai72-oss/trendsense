@@ -2,8 +2,8 @@ name: 🕷️ TrendSense Scrape + AI Pipeline (Mỗi 4 giờ)
 
 # Lên lịch chạy: Mỗi 4 tiếng cào dữ liệu → gửi nhỏ giọt sang Modal GPU xử lý AI
 on:
-#   schedule:
-#     - cron: '0 */4 * * *'
+  schedule:
+    - cron: '0 */4 * * *'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,8 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       MODAL_WEBHOOK_URL: ${{ secrets.MODAL_WEBHOOK_URL }}
       GEMINI_WEBHOOK_URL: ${{ secrets.GEMINI_WEBHOOK_URL }}
-      PROXY_LIST: ${{ secrets.PROXY_LIST }}
+      # PROXY_LIST sẽ được nạp động từ TheSpeedX/PROXY-List ở bước sau, fallback là secret nếu cần
+      PROXY_LIST_SECRET: ${{ secrets.PROXY_LIST }}
       ms_token: ${{ secrets.MS_TOKEN }}
       CF_WORKER_URL: ${{ secrets.CF_WORKER_URL }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -73,6 +74,22 @@ jobs:
         run: |
           playwright install chromium
           playwright install-deps chromium
+
+      - name: 🌐 Lấy proxy từ TheSpeedX/PROXY-List
+        run: |
+          echo "[*] Đang tải danh sách proxy HTTP..."
+          curl -s https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt -o http_proxies.txt
+          
+          # Nếu tải không được hoặc file rỗng, dùng fallback từ secret
+          if [ ! -s http_proxies.txt ]; then
+            echo "[!] Không tải được proxy. Sử dụng PROXY_LIST từ secret."
+            echo "PROXY_LIST=$PROXY_LIST_SECRET" >> $GITHUB_ENV
+          else
+            # Lấy 100 proxy đầu tiên, loại bỏ dòng trống, nối thành chuỗi
+            PROXY_STR=$(head -n 100 http_proxies.txt | grep -v '^\s*$' | tr '\n' ',' | sed 's/,$//')
+            echo "PROXY_LIST=$PROXY_STR" >> $GITHUB_ENV
+            echo "[*] Đã cấu hình ${#PROXY_STR} ký tự proxy."
+          fi
 
       - name: 🕷️ SCRAPE + TRIGGER — Bot cào metadata → Gửi sang Modal AI
         env:
