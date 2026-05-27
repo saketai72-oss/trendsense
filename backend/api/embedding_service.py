@@ -35,23 +35,76 @@ def _parse_retry_delay(error: Exception) -> float:
     return -1  # không parse được
 
 
+def _generate_embedding_ollama(text: str) -> Optional[List[float]]:
+    import requests
+    import os
+    ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+    base_url = ollama_url.split("/api")[0].rstrip("/")
+    
+    # 1. Thử api /api/embed (mới)
+    try:
+        resp = requests.post(
+            f"{base_url}/api/embed",
+            json={
+                "model": "nomic-embed-text",
+                "input": text.strip()
+            },
+            timeout=15
+        )
+        if resp.status_code == 200:
+            embeddings = resp.json().get("embeddings")
+            if embeddings and len(embeddings) > 0:
+                logger.info(f"[Embed] ✅ Sinh embedding thành công qua Ollama /api/embed (dim={len(embeddings[0])})")
+                return embeddings[0]
+    except Exception as e:
+        logger.debug(f"[Embed] Lỗi thử Ollama /api/embed: {e}")
+
+    # 2. Thử api /api/embeddings (cũ)
+    try:
+        resp = requests.post(
+            f"{base_url}/api/embeddings",
+            json={
+                "model": "nomic-embed-text",
+                "prompt": text.strip()
+            },
+            timeout=15
+        )
+        if resp.status_code == 200:
+            embedding = resp.json().get("embedding")
+            if embedding:
+                logger.info(f"[Embed] ✅ Sinh embedding thành công qua Ollama /api/embeddings (dim={len(embedding)})")
+                return embedding
+    except Exception as e:
+        logger.debug(f"[Embed] Lỗi thử Ollama /api/embeddings: {e}")
+        
+    return None
+
+def _pad_embedding(embedding: List[float], target_dim: int = 3072) -> List[float]:
+    if len(embedding) < target_dim:
+        return embedding + [0.0] * (target_dim - len(embedding))
+    elif len(embedding) > target_dim:
+        return embedding[:target_dim]
+    return embedding
+
 def generate_embedding(text: str, max_retries: int = 3) -> Optional[List[float]]:
     """
     Gọi Google Gemini API sinh vector cho đoạn text.
     Tự động retry khi bị 429 (rate limit) với exponential backoff.
+    Nếu không có key hoặc API lỗi → Fallback sang Ollama local.
 
     Returns:
-        List[float] (dim=3072) hoặc None nếu thiếu key / lỗi API
+        List[float] (dim=3072) hoặc None nếu lỗi
     """
     import os
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
 
-    if not gemini_key:
-        logger.debug("[Embed] Không có GEMINI_API_KEY — bỏ qua embedding.")
-        return None
-
     if not text or not text.strip():
         return None
+
+    if not gemini_key:
+        logger.info("[Embed] Không có GEMINI_API_KEY — Thử sinh embedding qua Ollama local.")
+        local_emb = _generate_embedding_ollama(text)
+        return _pad_embedding(local_emb) if local_emb else None
 
     try:
         from google import genai
@@ -69,7 +122,7 @@ def generate_embedding(text: str, max_retries: int = 3) -> Optional[List[float]]
                     if response and response.embeddings and response.embeddings[0].values:
                         embedding = response.embeddings[0].values
                         logger.debug(f"[Embed] ✅ Sinh embedding với {model_name} (dim={len(embedding)})")
-                        return embedding
+                        return _pad_embedding(embedding)
                     else:
                         raise ValueError("API trả về response trống hoặc không có giá trị embedding")
                 except Exception as model_err:
@@ -105,15 +158,19 @@ def generate_embedding(text: str, max_retries: int = 3) -> Optional[List[float]]
                 # Nếu vòng retry hết mà model vẫn fail, tiếp tục model khác
                 continue
 
-        logger.warning(f"[Embed] Không có model embedding nào khả dụng.")
-        return None
+        logger.warning(f"[Embed] Không có model embedding nào khả dụng. Thử fallback Ollama local...")
+        local_emb = _generate_embedding_ollama(text)
+        return _pad_embedding(local_emb) if local_emb else None
 
     except Exception as e:
         err_str = str(e)
         if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-            raise  # Ném lại 429 để caller biết đây là rate limit, không phải lỗi khác
-        logger.warning(f"[Embed] Lỗi Gemini Embeddings API: {e}")
-        return None
+            logger.warning("[Embed] Gemini Daily Quota/Rate Limit. Thử fallback Ollama local...")
+            local_emb = _generate_embedding_ollama(text)
+            return _pad_embedding(local_emb) if local_emb else None
+        logger.warning(f"[Embed] Lỗi Gemini Embeddings API: {e}. Thử fallback Ollama local...")
+        local_emb = _generate_embedding_ollama(text)
+        return _pad_embedding(local_emb) if local_emb else None
 
 
 def update_video_embedding(video_id: str, transcript: str, description: str) -> bool:
