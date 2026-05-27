@@ -13,3 +13,4 @@ set PYTHONIOENCODING=utf-8
 set PYTHONUNBUFFERED=1
 call venv\Scripts\activate.bat
 python -m services.tiktok_scraper.scraper_main >> logs\scraper.log 2>&1
+python -m services.ai_engine.ai_core_main >> logs\ai_worker.log 2>&1
