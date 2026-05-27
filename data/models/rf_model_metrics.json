@@ -1,20 +1,20 @@
 {
-  "accuracy": 0.9792207792207792,
-  "precision": 0.9549473320983619,
-  "recall": 0.904440333024977,
-  "f1": 0.9276603792850933,
-  "auc": 0.9956175220277901,
+  "accuracy": 0.9592783505154638,
+  "precision": 0.9271552981331974,
+  "recall": 0.7935710111046171,
+  "f1": 0.8535985917624054,
+  "auc": 0.9919356673684738,
   "feature_importances": {
-    "Like_Rate": 0.07097484143249304,
-    "Comment_Rate": 0.049571145595606506,
-    "Share_Rate": 0.0933775295208502,
-    "Save_Rate": 0.06481546141312766,
-    "Positive_Score": 0.011191716706623497,
-    "Views_Per_Hour": 0.7100693053312991
+    "Like_Rate": 0.1016328168800959,
+    "Comment_Rate": 0.04347764652326249,
+    "Share_Rate": 0.12261173827197652,
+    "Save_Rate": 0.06153288987306093,
+    "Positive_Score": 0.013084962412542327,
+    "Views_Per_Hour": 0.657659946039062
   },
-  "samples": 1540,
+  "samples": 1940,
   "positive_ratio": 0.15,
-  "threshold_viral_velocity": 32513.099999999977,
-  "trained_at": "2026-05-16T17:54:23.379166",
+  "threshold_viral_velocity": 10529.244999999983,
+  "trained_at": "2026-05-26T19:15:36.283460",
   "model_file": "rf_model.joblib"
 }
