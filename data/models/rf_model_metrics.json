@@ -1,20 +1,20 @@
 {
-  "accuracy": 0.975,
-  "precision": 0.9404757560196957,
-  "recall": 0.8904761904761905,
-  "f1": 0.9143622007612222,
-  "auc": 0.9960334133653461,
+  "accuracy": 0.9735445949399437,
+  "precision": 0.9375031995721651,
+  "recall": 0.8833333333333334,
+  "f1": 0.9089007938702345,
+  "auc": 0.9961643710115625,
   "feature_importances": {
-    "Like_Rate": 0.06252343248394265,
-    "Comment_Rate": 0.044399762102329925,
-    "Share_Rate": 0.12393312591558157,
-    "Save_Rate": 0.056380104107917696,
-    "Positive_Score": 0.0004353425298717718,
-    "Views_Per_Hour": 0.7123282328603563
+    "Like_Rate": 0.06293067051360882,
+    "Comment_Rate": 0.04585593155284925,
+    "Share_Rate": 0.1143755374145868,
+    "Save_Rate": 0.05128909198044849,
+    "Positive_Score": 0.0005254490652549566,
+    "Views_Per_Hour": 0.7250233194732517
   },
-  "samples": 2800,
-  "positive_ratio": 0.15,
-  "threshold_viral_velocity": 12021.855000000007,
-  "trained_at": "2026-06-05T18:58:05.686675",
+  "samples": 2797,
+  "positive_ratio": 0.15016088666428315,
+  "threshold_viral_velocity": 12718.719999999998,
+  "trained_at": "2026-06-06T18:03:40.383424",
   "model_file": "rf_model.joblib"
 }
